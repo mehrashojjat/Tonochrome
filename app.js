@@ -475,16 +475,23 @@ const AudioEngine = (() => {
   /**
    * Switch sound mode ('synth' | 'bell' | 'theremin').
    * If audio is running, tears down and rebuilds the graph in the new mode.
+   * If graph building fails, the mode is reverted to avoid an inconsistent state.
    */
   async function setMode(mode) {
     if (mode === soundMode) return;
+    const previousMode = soundMode;
     soundMode = mode;
     if (running) {
       teardownGraph();
       running = false;
       await ensureContext();
-      buildGraph(lastHSL);
-      running = true;
+      try {
+        buildGraph(lastHSL);
+        running = true;
+      } catch (err) {
+        console.error('[AudioEngine] Failed to build graph for mode "' + mode + '":', err);
+        soundMode = previousMode; // revert so UI stays consistent with audio state
+      }
     }
   }
 
@@ -587,10 +594,12 @@ const UI = (() => {
 
   /**
    * Handle sound mode button click.
+   * Always updates mode buttons to reflect the actual resulting mode,
+   * so the UI stays consistent even if audio graph building fails.
    */
   async function onModeClick(mode) {
     await AudioEngine.setMode(mode);
-    updateModeButtons(mode);
+    updateModeButtons(AudioEngine.soundMode);
   }
 
   /**
