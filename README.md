@@ -39,20 +39,59 @@ Lightness linearly controls the master gain with a mild power curve (`L^0.7`) fo
 
 ---
 
-## Audio Architecture
+## Sound Modes
+
+Tonochrome has three selectable sound modes, each with a distinct audio character. All three modes share the same HSL→audio mapping rules; only the synthesis method changes.
+
+### Synth (default)
+
+A pure sine wave mixed with pink noise. Simple, neutral, and great for exploring the HSL mapping.
 
 ```
 OscillatorNode (sine)         ──► gainOsc   ──┐
 AudioBufferSourceNode (noise) ──► gainNoise ──┤──► masterGain ──► DynamicsCompressor ──► destination
 ```
 
-- **OscillatorNode** — pure sine wave, frequency set by hue
-- **AudioBufferSourceNode** — pre-generated 2-second looping pink noise buffer (Paul Kellett approximation)
-- **gainOsc / gainNoise** — cross-fade the two sources based on saturation
-- **masterGain** — overall volume controlled by lightness; instantly ramps to 0 on mute
-- **DynamicsCompressor** — acts as a limiter to prevent clipping and protect against loud transients
+### Bell
 
-All parameter changes use `setTargetAtTime` with a 25 ms ramp to eliminate clicks and pops when dragging sliders.
+Additive harmonic synthesis layered with pink noise. Four sine partials (including a slightly inharmonic 4th) recreate the bright, piano-like timbre of a struck bell. Saturation sweeps from a noisy, distressed bell tone to clean, resonant harmonics.
+
+```
+OscillatorNode × 4 (harmonics, each ──► gainHarmonic) ──┐
+AudioBufferSourceNode (noise)        ──► gainNoise     ──┤──► masterGain ──► DynamicsCompressor ──► destination
+```
+
+Harmonic partials:
+
+| Partial | Ratio | Peak gain |
+|---------|-------|-----------|
+| Fundamental | 1× | 1.00 |
+| 1st overtone (octave) | 2× | 0.50 |
+| 2nd overtone | 3× | 0.20 |
+| 4th overtone (inharmonic) | 4.2× | 0.08 |
+
+### Theremin
+
+A sine oscillator with a slow LFO vibrato (~5 Hz) modulating its frequency, mixed with the same pink-noise path. This recreates the wavering, ethereal quality of a theremin. The LFO depth tracks the fundamental frequency (≈1.2% of pitch) so the vibrato intensity stays perceptually constant across the full hue range.
+
+```
+lfoOsc (sine, 5 Hz) ──► lfoGain (depth ≈ 1.2% of freq) ──► oscillator.frequency
+OscillatorNode (sine) ──► gainOsc   ──┐
+AudioBufferSourceNode (noise) ──► gainNoise ──┤──► masterGain ──► DynamicsCompressor ──► destination
+```
+
+---
+
+## Audio Architecture
+
+All parameter changes use `setTargetAtTime` with a 25 ms ramp to eliminate clicks and pops when dragging sliders or switching modes. Switching modes while audio is playing tears down the current graph and rebuilds it immediately in the new mode with no audible gap.
+
+Common nodes across all modes:
+
+- **AudioBufferSourceNode** — pre-generated 2-second looping pink noise buffer (Paul Kellett approximation)
+- **gainOsc / gainNoise** — cross-fade tone and noise based on saturation
+- **masterGain** — overall volume controlled by lightness; ramps smoothly to 0 on mute
+- **DynamicsCompressor** — limiter to prevent clipping and protect against loud transients
 
 ---
 
@@ -65,6 +104,7 @@ All parameter changes use `setTargetAtTime` with a 25 ms ramp to eliminate click
 | **Hue slider** | 0–360°, rendered over a full-spectrum gradient |
 | **Saturation slider** | 0–100%, rendered over a grey→vivid gradient |
 | **Lightness slider** | 0–100%, rendered over a black→grey→white gradient |
+| **Synth / Bell / Theremin** | Sound mode selector — switches the synthesis method in real time |
 | **Play / Stop** | Starts or stops the audio engine |
 | **Mute / Unmute** | Silences audio without stopping the engine |
 | **Info panel** | Live readout: Frequency (Hz), Noise blend (%), Volume (%) |
@@ -100,7 +140,10 @@ Tonochrome/
 ### `app.js` modules
 
 - **Section 1 — Audio mapping** (pure functions, no browser dependencies): `hueToFrequency`, `saturationToNoiseGain`, `saturationToOscGain`, `lightnessToVolume`
-- **Section 2 — AudioEngine** (IIFE): manages the Web Audio graph, exposes `start`, `stop`, `update`, `setMute`
+- **Section 2 — AudioEngine** (IIFE): manages the Web Audio graph, exposes `start`, `stop`, `update`, `setMute`, `setMode`
+  - `buildSynthGraph` — sine oscillator + pink noise
+  - `buildBellGraph` — additive harmonic synthesis + pink noise
+  - `buildThereminGraph` — sine oscillator with LFO vibrato + pink noise
 - **Section 3 — UI** (IIFE): reads sliders, updates visuals, wires DOM events
 - **Section 4 — Bootstrap**: `DOMContentLoaded` entry point
 
