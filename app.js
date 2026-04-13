@@ -10,8 +10,8 @@
  *
  * Mapping rules
  *  Hue  (0–360)  → Frequency  110–880 Hz  (logarithmic / octave-loop)
- *  Sat  (0–1)    → Noise gain  0–0.30      (noise never overpowers tone)
- *  Lig  (0–1)    → Master vol  0–0.80      (non-linear / perceptual)
+ *  Sat  (0–1)    → Noise gain  0.30–0    (inverted: grey=noisy, vivid=clean)
+ *  Lig  (0–1)    → Master vol  0–0.80    (linear power curve: dark=silent, bright=loud)
  *
  * The core mapping functions are pure (no DOM / Web Audio references)
  * so they can be reused in React Native or other environments.
@@ -44,47 +44,51 @@ function hueToFrequency(hue) {
 }
 
 /**
- * Saturation → Noise gain
- * Subtle blend: max noise is 30 % of signal so tone stays dominant.
- * Uses a mild square-root curve so the transition feels natural.
+ * Saturation → Noise gain (inverted)
+ * Low saturation (grey) = maximum noise; high saturation (vivid) = no noise.
+ * Uses a square-root curve so the transition feels natural.
+ *
+ *   sat = 0   → noise = MAX_NOISE (0.30)
+ *   sat = 1   → noise = 0
  *
  * @param {number} saturation - 0..1
  * @returns {number} noise gain 0..0.30
  */
 function saturationToNoiseGain(saturation) {
   const MAX_NOISE = 0.30;
-  return MAX_NOISE * Math.sqrt(saturation);
+  return MAX_NOISE * Math.sqrt(1 - saturation);
 }
 
 /**
- * Saturation → Oscillator gain (inverse complement)
- * As noise rises, tone gain drops slightly (never below 0.70)
- * to maintain overall perceived loudness balance.
+ * Saturation → Oscillator gain (complement of noise)
+ * Low saturation = noise dominant, so osc gain is lower;
+ * high saturation = clean tone, so osc gain is full.
+ *
+ *   sat = 0   → osc gain = 0.70
+ *   sat = 1   → osc gain = 1.00
  *
  * @param {number} saturation - 0..1
  * @returns {number} oscillator gain 0.70..1.00
  */
 function saturationToOscGain(saturation) {
   const MAX_NOISE = 0.30;
-  return 1.0 - MAX_NOISE * Math.sqrt(saturation);
+  return 1.0 - MAX_NOISE * Math.sqrt(1 - saturation);
 }
 
 /**
  * Lightness → Master volume
- * Perceptual (power) scaling: humans perceive loudness non-linearly.
- * Midpoint (50% lightness) → ~60% max volume.
- * Pure black (0%) and pure white (100%) → 0 (perceptually silent).
+ * Linear mapping: dark (L=0) is silent, bright (L=1) is loudest.
+ * Uses a mild power curve for a more natural perceptual ramp.
  *
- * Modelled as an inverted parabola centred on L=0.5:
- *   vol = MAX_VOL * (1 − |2L − 1|^2)
+ *   L = 0   → vol = 0
+ *   L = 1   → vol = MAX_VOL (0.80)
  *
  * @param {number} lightness - 0..1
  * @returns {number} master gain 0..0.80
  */
 function lightnessToVolume(lightness) {
   const MAX_VOL = 0.80;
-  const deviation = Math.abs(2 * lightness - 1);
-  return MAX_VOL * (1 - deviation * deviation);
+  return MAX_VOL * Math.pow(lightness, 0.7);
 }
 
 /* ============================================================
