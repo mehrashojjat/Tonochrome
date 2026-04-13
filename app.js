@@ -89,6 +89,14 @@ function lightnessToVolume(lightness) {
   return MAX_VOL * Math.pow(lightness, 0.7);
 }
 
+/* Bell mode harmonic partials: ratio relative to fundamental and peak gain */
+const BELL_HARMONICS = [
+  { ratio: 1,   gain: 1.00 }, // fundamental
+  { ratio: 2,   gain: 0.50 }, // 1st overtone (octave)
+  { ratio: 3,   gain: 0.20 }, // 2nd overtone
+  { ratio: 4.2, gain: 0.08 }, // slightly inharmonic — gives bell/piano colour
+];
+
 /* ============================================================
    2. AUDIO ENGINE
    ============================================================ */
@@ -104,6 +112,10 @@ const AudioEngine = (() => {
   let noiseBuffer = null;
   let running = false;
   let muted = false;
+  let soundMode = 'synth'; // 'synth' | 'bell'
+  let lastHSL = { hue: 0, saturation: 1, lightness: 0.5 };
+  let harmonicOscs = [];
+  let harmonicGains = []; // array of { node: GainNode, baseGain: number }
 
   // Ramp time for smooth parameter changes (avoids clicks/pops)
   const RAMP_TIME = 0.025; // seconds
@@ -155,7 +167,7 @@ const AudioEngine = (() => {
    * Build the audio graph.
    * Called once per play session.
    */
-  function buildGraph(hsl) {
+  function buildSynthGraph(hsl) {
     createNoiseBuffer();
 
     // Oscillator (sine — clean, neutral)
@@ -200,6 +212,56 @@ const AudioEngine = (() => {
   }
 
   /**
+   * Build the bell/piano audio graph using additive harmonic synthesis.
+   * Saturation controls harmonic brightness: low sat = pure fundamental,
+   * high sat = all overtones present (richer bell/piano timbre).
+   */
+  function buildBellGraph(hsl) {
+    const freq = hueToFrequency(hsl.hue);
+    const brightness = Math.sqrt(hsl.saturation);
+
+    masterGain = ctx.createGain();
+    masterGain.gain.value = muted ? 0 : lightnessToVolume(hsl.lightness);
+
+    compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -6;
+    compressor.knee.value = 6;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.15;
+
+    masterGain.connect(compressor);
+    compressor.connect(ctx.destination);
+
+    BELL_HARMONICS.forEach((h, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq * h.ratio;
+
+      const g = ctx.createGain();
+      g.gain.value = h.gain * (i === 0 ? 1.0 : brightness);
+
+      osc.connect(g);
+      g.connect(masterGain);
+      osc.start();
+
+      harmonicOscs.push(osc);
+      harmonicGains.push({ node: g, baseGain: h.gain });
+    });
+  }
+
+  /**
+   * Dispatch to the appropriate graph builder based on current sound mode.
+   */
+  function buildGraph(hsl) {
+    if (soundMode === 'bell') {
+      buildBellGraph(hsl);
+    } else {
+      buildSynthGraph(hsl);
+    }
+  }
+
+  /**
    * Tear down the audio graph (stop & disconnect).
    */
   function teardownGraph() {
@@ -217,6 +279,12 @@ const AudioEngine = (() => {
     if (gainNoise) { gainNoise.disconnect(); gainNoise = null; }
     if (masterGain) { masterGain.disconnect(); masterGain = null; }
     if (compressor) { compressor.disconnect(); compressor = null; }
+    harmonicOscs.forEach(osc => {
+      try { osc.stop(); } catch (_) {}
+      osc.disconnect();
+    });
+    harmonicOscs = [];
+    harmonicGains = [];
   }
 
   /**
@@ -228,6 +296,7 @@ const AudioEngine = (() => {
     if (running) return;
     await ensureContext();
     buildGraph(hsl);
+    lastHSL = { ...hsl };
     running = true;
   }
 
@@ -256,18 +325,29 @@ const AudioEngine = (() => {
    */
   function update(hsl) {
     if (!running || !ctx) return;
+    lastHSL = { ...hsl };
     const now = ctx.currentTime;
 
-    if (oscillator) {
-      oscillator.frequency.setTargetAtTime(hueToFrequency(hsl.hue), now, RAMP_TIME);
-    }
-
-    if (gainNoise) {
-      gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
-    }
-
-    if (gainOsc) {
-      gainOsc.gain.setTargetAtTime(saturationToOscGain(hsl.saturation), now, RAMP_TIME);
+    if (soundMode === 'bell') {
+      const freq = hueToFrequency(hsl.hue);
+      const brightness = Math.sqrt(hsl.saturation);
+      harmonicOscs.forEach((osc, i) => {
+        osc.frequency.setTargetAtTime(freq * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
+      });
+      harmonicGains.forEach((h, i) => {
+        const scale = i === 0 ? 1.0 : brightness;
+        h.node.gain.setTargetAtTime(h.baseGain * scale, now, RAMP_TIME);
+      });
+    } else {
+      if (oscillator) {
+        oscillator.frequency.setTargetAtTime(hueToFrequency(hsl.hue), now, RAMP_TIME);
+      }
+      if (gainNoise) {
+        gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
+      }
+      if (gainOsc) {
+        gainOsc.gain.setTargetAtTime(saturationToOscGain(hsl.saturation), now, RAMP_TIME);
+      }
     }
 
     if (masterGain) {
@@ -289,7 +369,23 @@ const AudioEngine = (() => {
     masterGain.gain.setTargetAtTime(targetVol, now, RAMP_TIME);
   }
 
-  return { start, stop, update, setMute, get isRunning() { return running; }, get isMuted() { return muted; } };
+  /**
+   * Switch sound mode ('synth' | 'bell').
+   * If audio is running, tears down and rebuilds the graph in the new mode.
+   */
+  async function setMode(mode) {
+    if (mode === soundMode) return;
+    soundMode = mode;
+    if (running) {
+      teardownGraph();
+      running = false;
+      await ensureContext();
+      buildGraph(lastHSL);
+      running = true;
+    }
+  }
+
+  return { start, stop, update, setMute, setMode, get isRunning() { return running; }, get isMuted() { return muted; }, get soundMode() { return soundMode; } };
 })();
 
 /* ============================================================
@@ -315,6 +411,10 @@ const UI = (() => {
   const freqDisplay = document.getElementById("freqDisplay");
   const noiseDisplay = document.getElementById("noiseDisplay");
   const volDisplay = document.getElementById("volDisplay");
+
+  const modeSynthBtn = document.getElementById("modeSynth");
+  const modeBellBtn = document.getElementById("modeBell");
+  const satHint = document.getElementById("satHint");
 
   /**
    * Read current HSL values from sliders.
@@ -372,6 +472,23 @@ const UI = (() => {
   }
 
   /**
+   * Sync mode button appearance and saturation hint to current mode.
+   */
+  function updateModeButtons(mode) {
+    modeSynthBtn.setAttribute("aria-pressed", String(mode === 'synth'));
+    modeBellBtn.setAttribute("aria-pressed", String(mode === 'bell'));
+    satHint.textContent = mode === 'bell' ? 'Controls harmonic richness' : 'Controls noise texture';
+  }
+
+  /**
+   * Handle sound mode button click.
+   */
+  async function onModeClick(mode) {
+    await AudioEngine.setMode(mode);
+    updateModeButtons(mode);
+  }
+
+  /**
    * Handle any slider change.
    */
   function onSliderChange() {
@@ -426,6 +543,7 @@ const UI = (() => {
     updateVisuals(hsl);
     updatePlayBtn(false);
     updateMuteBtn(false);
+    updateModeButtons('synth');
 
     hueSlider.addEventListener("input", onSliderChange);
     satSlider.addEventListener("input", onSliderChange);
@@ -433,6 +551,9 @@ const UI = (() => {
 
     playBtn.addEventListener("click", onPlayClick);
     muteBtn.addEventListener("click", onMuteClick);
+
+    modeSynthBtn.addEventListener("click", () => onModeClick('synth'));
+    modeBellBtn.addEventListener("click", () => onModeClick('bell'));
 
     document.addEventListener("visibilitychange", onVisibilityChange);
   }

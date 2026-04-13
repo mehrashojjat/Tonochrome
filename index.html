@@ -56,7 +56,7 @@
               aria-label="Saturation (0–100%), controls noise texture"
             />
           </div>
-          <p class="control-hint">Controls noise texture</p>
+          <p class="control-hint" id="satHint">Controls noise texture</p>
         </div>
 
         <div class="control-group">
@@ -88,6 +88,17 @@
         <button class="btn btn-mute" id="muteBtn" aria-pressed="false" disabled>
           <span class="btn-icon" aria-hidden="true">🔊</span>
           <span class="btn-text">Mute</span>
+        </button>
+      </section>
+
+      <section class="sound-mode" aria-label="Sound mode">
+        <button class="btn btn-mode" id="modeSynth" aria-pressed="true">
+          <span class="btn-icon" aria-hidden="true">◈</span>
+          <span class="btn-text">Synth</span>
+        </button>
+        <button class="btn btn-mode" id="modeBell" aria-pressed="false">
+          <span class="btn-icon" aria-hidden="true">♪</span>
+          <span class="btn-text">Bell</span>
         </button>
       </section>
 
