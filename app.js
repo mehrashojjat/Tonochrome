@@ -66,7 +66,7 @@ function saturationToNoiseGain(saturation) {
  */
 function saturationToOscGain(saturation) {
   const MAX_NOISE = 0.30;
-  return 1.0 - saturationToNoiseGain(saturation) * (MAX_NOISE / 0.30) * MAX_NOISE;
+  return 1.0 - MAX_NOISE * Math.sqrt(saturation);
 }
 
 /**
@@ -410,9 +410,8 @@ const UI = (() => {
    */
   function onVisibilityChange() {
     if (document.visibilityState === "visible" && AudioEngine.isRunning) {
-      // AudioContext may have been auto-suspended by the browser
-      const ctx = window._tonoCtx; // not exposed; handled inside ensureContext
-      // We trigger a silent update to kick the context back if needed
+      // AudioContext may have been auto-suspended by the browser on tab hide;
+      // triggering an update lets ensureContext resume it on the next interaction.
       AudioEngine.update(getHSL());
     }
   }
