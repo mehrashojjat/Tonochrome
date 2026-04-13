@@ -112,10 +112,12 @@ const AudioEngine = (() => {
   let noiseBuffer = null;
   let running = false;
   let muted = false;
-  let soundMode = 'synth'; // 'synth' | 'bell'
+  let soundMode = 'synth'; // 'synth' | 'bell' | 'theremin'
   let lastHSL = { hue: 0, saturation: 1, lightness: 0.5 };
   let harmonicOscs = [];
   let harmonicGains = []; // array of { node: GainNode, baseGain: number }
+  let lfoOsc = null;  // Theremin vibrato LFO oscillator
+  let lfoGain = null; // Theremin vibrato depth gain
 
   // Ramp time for smooth parameter changes (avoids clicks/pops)
   const RAMP_TIME = 0.025; // seconds
@@ -266,11 +268,78 @@ const AudioEngine = (() => {
   }
 
   /**
+   * Build the Theremin audio graph.
+   * A pure sine oscillator with LFO vibrato layered with the same
+   * pink-noise path as Synth/Bell so saturation noise works identically.
+   *
+   * Graph:
+   *   lfoOsc (sine ~5 Hz) ──► lfoGain (depth ≈ 1.2% of freq) ──► oscillator.frequency
+   *   oscillator (sine) ──► gainOsc ──┐
+   *   noiseSource ──► gainNoise ───────┤
+   *                                masterGain ──► compressor ──► destination
+   */
+  function buildThereminGraph(hsl) {
+    createNoiseBuffer();
+
+    const freq = hueToFrequency(hsl.hue);
+
+    // Main oscillator
+    oscillator = ctx.createOscillator();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = freq;
+
+    // Vibrato LFO — modulates oscillator frequency
+    lfoOsc = ctx.createOscillator();
+    lfoOsc.type = 'sine';
+    lfoOsc.frequency.value = 5; // 5 Hz vibrato rate
+
+    lfoGain = ctx.createGain();
+    lfoGain.gain.value = freq * 0.012; // ~1.2% of fundamental = subtle vibrato depth
+
+    lfoOsc.connect(lfoGain);
+    lfoGain.connect(oscillator.frequency);
+
+    gainOsc = ctx.createGain();
+    gainOsc.gain.value = saturationToOscGain(hsl.saturation);
+
+    // Noise source (same as Synth/Bell)
+    noiseSource = ctx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+    noiseSource.loop = true;
+
+    gainNoise = ctx.createGain();
+    gainNoise.gain.value = saturationToNoiseGain(hsl.saturation);
+
+    masterGain = ctx.createGain();
+    masterGain.gain.value = muted ? 0 : lightnessToVolume(hsl.lightness);
+
+    compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -6;
+    compressor.knee.value = 6;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.15;
+
+    oscillator.connect(gainOsc);
+    noiseSource.connect(gainNoise);
+    gainOsc.connect(masterGain);
+    gainNoise.connect(masterGain);
+    masterGain.connect(compressor);
+    compressor.connect(ctx.destination);
+
+    oscillator.start();
+    lfoOsc.start();
+    noiseSource.start();
+  }
+
+  /**
    * Dispatch to the appropriate graph builder based on current sound mode.
    */
   function buildGraph(hsl) {
     if (soundMode === 'bell') {
       buildBellGraph(hsl);
+    } else if (soundMode === 'theremin') {
+      buildThereminGraph(hsl);
     } else {
       buildSynthGraph(hsl);
     }
@@ -292,6 +361,8 @@ const AudioEngine = (() => {
     }
     if (gainOsc) { gainOsc.disconnect(); gainOsc = null; }
     if (gainNoise) { gainNoise.disconnect(); gainNoise = null; }
+    if (lfoOsc) { try { lfoOsc.stop(); } catch (_) {} lfoOsc.disconnect(); lfoOsc = null; }
+    if (lfoGain) { lfoGain.disconnect(); lfoGain = null; }
     if (masterGain) { masterGain.disconnect(); masterGain = null; }
     if (compressor) { compressor.disconnect(); compressor = null; }
     harmonicOscs.forEach(osc => {
@@ -355,6 +426,21 @@ const AudioEngine = (() => {
       if (gainNoise) {
         gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
       }
+    } else if (soundMode === 'theremin') {
+      const freq = hueToFrequency(hsl.hue);
+      if (oscillator) {
+        oscillator.frequency.setTargetAtTime(freq, now, RAMP_TIME);
+      }
+      // Update LFO vibrato depth to track the new fundamental frequency
+      if (lfoGain) {
+        lfoGain.gain.setTargetAtTime(freq * 0.012, now, RAMP_TIME);
+      }
+      if (gainNoise) {
+        gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
+      }
+      if (gainOsc) {
+        gainOsc.gain.setTargetAtTime(saturationToOscGain(hsl.saturation), now, RAMP_TIME);
+      }
     } else {
       if (oscillator) {
         oscillator.frequency.setTargetAtTime(hueToFrequency(hsl.hue), now, RAMP_TIME);
@@ -387,7 +473,7 @@ const AudioEngine = (() => {
   }
 
   /**
-   * Switch sound mode ('synth' | 'bell').
+   * Switch sound mode ('synth' | 'bell' | 'theremin').
    * If audio is running, tears down and rebuilds the graph in the new mode.
    */
   async function setMode(mode) {
@@ -431,6 +517,7 @@ const UI = (() => {
 
   const modeSynthBtn = document.getElementById("modeSynth");
   const modeBellBtn = document.getElementById("modeBell");
+  const modeThereminBtn = document.getElementById("modeThermin");
   const satHint = document.getElementById("satHint");
 
   /**
@@ -494,6 +581,7 @@ const UI = (() => {
   function updateModeButtons(mode) {
     modeSynthBtn.setAttribute("aria-pressed", String(mode === 'synth'));
     modeBellBtn.setAttribute("aria-pressed", String(mode === 'bell'));
+    modeThereminBtn.setAttribute("aria-pressed", String(mode === 'theremin'));
     satHint.textContent = 'Controls noise texture';
   }
 
@@ -571,6 +659,7 @@ const UI = (() => {
 
     modeSynthBtn.addEventListener("click", () => onModeClick('synth'));
     modeBellBtn.addEventListener("click", () => onModeClick('bell'));
+    modeThereminBtn.addEventListener("click", () => onModeClick('theremin'));
 
     document.addEventListener("visibilitychange", onVisibilityChange);
   }
