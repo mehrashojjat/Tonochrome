@@ -212,13 +212,23 @@ const AudioEngine = (() => {
   }
 
   /**
-   * Build the bell/piano audio graph using additive harmonic synthesis.
-   * Saturation controls harmonic brightness: low sat = pure fundamental,
-   * high sat = all overtones present (richer bell/piano timbre).
+   * Build the bell/piano audio graph using additive harmonic synthesis
+   * layered with the same pink-noise path as Synth mode.
+   * Saturation low  → noisy (grey, distressed bell)
+   * Saturation high → clean harmonics (vivid, pure bell/piano tone)
    */
   function buildBellGraph(hsl) {
+    createNoiseBuffer();
+
     const freq = hueToFrequency(hsl.hue);
-    const brightness = Math.sqrt(hsl.saturation);
+
+    // Noise source (same as Synth)
+    noiseSource = ctx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+    noiseSource.loop = true;
+
+    gainNoise = ctx.createGain();
+    gainNoise.gain.value = saturationToNoiseGain(hsl.saturation);
 
     masterGain = ctx.createGain();
     masterGain.gain.value = muted ? 0 : lightnessToVolume(hsl.lightness);
@@ -230,16 +240,19 @@ const AudioEngine = (() => {
     compressor.attack.value = 0.003;
     compressor.release.value = 0.15;
 
+    noiseSource.connect(gainNoise);
+    gainNoise.connect(masterGain);
     masterGain.connect(compressor);
     compressor.connect(ctx.destination);
 
+    // Additive harmonic oscillators — gain scaled by saturation
     BELL_HARMONICS.forEach((h, i) => {
       const osc = ctx.createOscillator();
       osc.type = 'sine';
       osc.frequency.value = freq * h.ratio;
 
       const g = ctx.createGain();
-      g.gain.value = h.gain * (i === 0 ? 1.0 : brightness);
+      g.gain.value = h.gain * saturationToOscGain(hsl.saturation);
 
       osc.connect(g);
       g.connect(masterGain);
@@ -248,6 +261,8 @@ const AudioEngine = (() => {
       harmonicOscs.push(osc);
       harmonicGains.push({ node: g, baseGain: h.gain });
     });
+
+    noiseSource.start();
   }
 
   /**
@@ -330,14 +345,16 @@ const AudioEngine = (() => {
 
     if (soundMode === 'bell') {
       const freq = hueToFrequency(hsl.hue);
-      const brightness = Math.sqrt(hsl.saturation);
+      const oscScale = saturationToOscGain(hsl.saturation);
       harmonicOscs.forEach((osc, i) => {
         osc.frequency.setTargetAtTime(freq * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
       });
-      harmonicGains.forEach((h, i) => {
-        const scale = i === 0 ? 1.0 : brightness;
-        h.node.gain.setTargetAtTime(h.baseGain * scale, now, RAMP_TIME);
+      harmonicGains.forEach(h => {
+        h.node.gain.setTargetAtTime(h.baseGain * oscScale, now, RAMP_TIME);
       });
+      if (gainNoise) {
+        gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
+      }
     } else {
       if (oscillator) {
         oscillator.frequency.setTargetAtTime(hueToFrequency(hsl.hue), now, RAMP_TIME);
@@ -477,7 +494,7 @@ const UI = (() => {
   function updateModeButtons(mode) {
     modeSynthBtn.setAttribute("aria-pressed", String(mode === 'synth'));
     modeBellBtn.setAttribute("aria-pressed", String(mode === 'bell'));
-    satHint.textContent = mode === 'bell' ? 'Controls harmonic richness' : 'Controls noise texture';
+    satHint.textContent = 'Controls noise texture';
   }
 
   /**
