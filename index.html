@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tonochrome — Color → Sound</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <h1 class="app-title">Tonochrome</h1>
+        <p class="app-subtitle">Color → Sound (HSL)</p>
+      </header>
+
+      <section class="color-preview" aria-label="Color preview">
+        <div class="color-swatch" id="colorSwatch"></div>
+        <p class="color-label" id="colorLabel">hsl(0, 100%, 50%)</p>
+      </section>
+
+      <section class="controls" aria-label="Color controls">
+        <div class="control-group">
+          <label class="control-label" for="hueSlider">
+            <span class="label-text">Hue</span>
+            <span class="label-value" id="hueValue">0°</span>
+          </label>
+          <div class="slider-track hue-track">
+            <input
+              type="range"
+              id="hueSlider"
+              class="slider"
+              min="0"
+              max="360"
+              value="0"
+              step="1"
+              aria-label="Hue (0–360 degrees), controls pitch"
+            />
+          </div>
+          <p class="control-hint">Controls pitch</p>
+        </div>
+
+        <div class="control-group">
+          <label class="control-label" for="saturationSlider">
+            <span class="label-text">Saturation</span>
+            <span class="label-value" id="saturationValue">100%</span>
+          </label>
+          <div class="slider-track saturation-track">
+            <input
+              type="range"
+              id="saturationSlider"
+              class="slider"
+              min="0"
+              max="100"
+              value="100"
+              step="1"
+              aria-label="Saturation (0–100%), controls noise texture"
+            />
+          </div>
+          <p class="control-hint">Controls noise texture</p>
+        </div>
+
+        <div class="control-group">
+          <label class="control-label" for="lightnessSlider">
+            <span class="label-text">Lightness</span>
+            <span class="label-value" id="lightnessValue">50%</span>
+          </label>
+          <div class="slider-track lightness-track">
+            <input
+              type="range"
+              id="lightnessSlider"
+              class="slider"
+              min="0"
+              max="100"
+              value="50"
+              step="1"
+              aria-label="Lightness (0–100%), controls volume"
+            />
+          </div>
+          <p class="control-hint">Controls volume</p>
+        </div>
+      </section>
+
+      <section class="playback" aria-label="Playback controls">
+        <button class="btn btn-play" id="playBtn" aria-pressed="false">
+          <span class="btn-icon" aria-hidden="true">▶</span>
+          <span class="btn-text">Play</span>
+        </button>
+        <button class="btn btn-mute" id="muteBtn" aria-pressed="false" disabled>
+          <span class="btn-icon" aria-hidden="true">🔊</span>
+          <span class="btn-text">Mute</span>
+        </button>
+      </section>
+
+      <section class="mapping-info" aria-label="Mapping information">
+        <dl class="mapping-list">
+          <div class="mapping-item">
+            <dt>Frequency</dt>
+            <dd id="freqDisplay">— Hz</dd>
+          </div>
+          <div class="mapping-item">
+            <dt>Noise blend</dt>
+            <dd id="noiseDisplay">—%</dd>
+          </div>
+          <div class="mapping-item">
+            <dt>Volume</dt>
+            <dd id="volDisplay">—%</dd>
+          </div>
+        </dl>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
