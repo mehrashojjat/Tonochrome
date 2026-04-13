@@ -10,7 +10,7 @@
  *
  * Mapping rules
  *  Hue  (0–360)  → Frequency  110–880 Hz  (logarithmic / octave-loop)
- *  Sat  (0–1)    → Noise gain  0.30–0    (inverted: grey=noisy, vivid=clean)
+ *  Sat  (0–1)    → Noise gain  1.0–0    (inverted full range: grey=100% noise, vivid=silent)
  *  Lig  (0–1)    → Master vol  0–0.80    (linear power curve: dark=silent, bright=loud)
  *
  * The core mapping functions are pure (no DOM / Web Audio references)
@@ -44,35 +44,33 @@ function hueToFrequency(hue) {
 }
 
 /**
- * Saturation → Noise gain (inverted)
- * Low saturation (grey) = maximum noise; high saturation (vivid) = no noise.
+ * Saturation → Noise gain (inverted, full range)
+ * Low saturation (grey) = full noise (1.0); high saturation (vivid) = no noise (0).
  * Uses a square-root curve so the transition feels natural.
  *
- *   sat = 0   → noise = MAX_NOISE (0.30)
+ *   sat = 0   → noise = 1.0 (100%)
  *   sat = 1   → noise = 0
  *
  * @param {number} saturation - 0..1
- * @returns {number} noise gain 0..0.30
+ * @returns {number} noise gain 0..1.0
  */
 function saturationToNoiseGain(saturation) {
-  const MAX_NOISE = 0.30;
-  return MAX_NOISE * Math.sqrt(1 - saturation);
+  return Math.sqrt(1 - saturation);
 }
 
 /**
- * Saturation → Oscillator gain (complement of noise)
- * Low saturation = noise dominant, so osc gain is lower;
- * high saturation = clean tone, so osc gain is full.
+ * Saturation → Oscillator gain (complement of noise, full range)
+ * Low saturation = noise dominant, osc silent;
+ * high saturation = clean tone, osc at full volume.
  *
- *   sat = 0   → osc gain = 0.70
- *   sat = 1   → osc gain = 1.00
+ *   sat = 0   → osc gain = 0
+ *   sat = 1   → osc gain = 1.0
  *
  * @param {number} saturation - 0..1
- * @returns {number} oscillator gain 0.70..1.00
+ * @returns {number} oscillator gain 0..1.0
  */
 function saturationToOscGain(saturation) {
-  const MAX_NOISE = 0.30;
-  return 1.0 - MAX_NOISE * Math.sqrt(1 - saturation);
+  return Math.sqrt(saturation);
 }
 
 /**
