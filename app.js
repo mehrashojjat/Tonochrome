@@ -23,6 +23,33 @@
    ============================================================ */
 
 /**
+ * Convert an average RGB colour (0–255 each channel) to HSL.
+ * Returns { hue: 0..360, saturation: 0..1, lightness: 0..1 }.
+ *
+ * @param {number} r - 0..255
+ * @param {number} g - 0..255
+ * @param {number} b - 0..255
+ * @returns {{ hue: number, saturation: number, lightness: number }}
+ */
+function rgbToHsl(r, g, b) {
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  let h = 0, s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case rn: h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6; break;
+      case gn: h = ((bn - rn) / d + 2) / 6; break;
+      default:  h = ((rn - gn) / d + 4) / 6; break;
+    }
+  }
+  return { hue: h * 360, saturation: s, lightness: l };
+}
+
+/**
  * Hue → Frequency
  * Logarithmic (exponential) mapping over one octave so that
  * hue 0° and 360° produce the same perceptual pitch (110 Hz).
@@ -499,7 +526,152 @@ const AudioEngine = (() => {
 })();
 
 /* ============================================================
-   3. UI CONTROLLER
+   3. CAMERA ENGINE
+   ============================================================ */
+
+/**
+ * CameraEngine
+ * ─────────────────────────────────────────────────────────────
+ * Manages camera access, continuous frame sampling, average-colour
+ * extraction, and torch (flash) control.
+ *
+ * Usage:
+ *   const ok = await CameraEngine.start(videoElement, (hsl) => { … });
+ *   CameraEngine.stop();
+ *   await CameraEngine.toggleFlash(true);
+ *
+ * The supplied callback receives a normalised HSL object on every
+ * sample tick (~15 fps by default) so that the caller can update the
+ * audio engine and slider visuals without knowing about camera internals.
+ * ─────────────────────────────────────────────────────────────
+ */
+const CameraEngine = (() => {
+  const SAMPLE_W = 16;            // down-scale width  (px)
+  const SAMPLE_H = 16;            // down-scale height (px)
+  const SAMPLE_INTERVAL_MS = 67;  // ~15 fps
+
+  let stream = null;
+  let videoEl = null;
+  let offCanvas = null;   // hidden 16×16 canvas — lives for the session
+  let offCtx = null;
+  let active = false;
+  let _hasTorch = false;
+  let _torchOn = false;
+  let loopTimer = null;
+  let onHSLCallback = null;
+
+  /** Extract a single average-colour HSL from the current video frame. */
+  function sampleFrame() {
+    if (!offCtx || !videoEl || videoEl.readyState < 2) return null;
+    offCtx.drawImage(videoEl, 0, 0, SAMPLE_W, SAMPLE_H);
+    const { data } = offCtx.getImageData(0, 0, SAMPLE_W, SAMPLE_H);
+    const pixels = SAMPLE_W * SAMPLE_H;
+    let rSum = 0, gSum = 0, bSum = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      rSum += data[i];
+      gSum += data[i + 1];
+      bSum += data[i + 2];
+    }
+    return rgbToHsl(rSum / pixels, gSum / pixels, bSum / pixels);
+  }
+
+  /** Recurring sample loop — runs while `active` is true. */
+  function loop() {
+    if (!active) return;
+    const hsl = sampleFrame();
+    if (hsl && onHSLCallback) onHSLCallback(hsl);
+    loopTimer = setTimeout(loop, SAMPLE_INTERVAL_MS);
+  }
+
+  /**
+   * Start the camera.
+   * @param {HTMLVideoElement} videoElement - preview element
+   * @param {function} hslCallback - called with {hue,saturation,lightness} on each tick
+   * @returns {Promise<boolean>} true on success, false if permission denied
+   */
+  async function start(videoElement, hslCallback) {
+    if (active) return true;
+    videoEl = videoElement;
+    onHSLCallback = hslCallback;
+
+    // Create the reusable off-screen canvas
+    offCanvas = document.createElement('canvas');
+    offCanvas.width = SAMPLE_W;
+    offCanvas.height = SAMPLE_H;
+    offCtx = offCanvas.getContext('2d');
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+    } catch (err) {
+      console.warn('[CameraEngine] Camera access denied or unavailable:', err);
+      offCanvas = null;
+      offCtx = null;
+      videoEl = null;
+      return false;
+    }
+
+    videoEl.srcObject = stream;
+
+    // Detect torch capability (only available after stream is granted)
+    const track = stream.getVideoTracks()[0];
+    if (track && typeof track.getCapabilities === 'function') {
+      const caps = track.getCapabilities();
+      _hasTorch = caps.torch === true;
+    }
+
+    active = true;
+    loop();
+    return true;
+  }
+
+  /** Stop the camera and clean up resources. */
+  function stop() {
+    if (!active) return;
+    active = false;
+    if (loopTimer) { clearTimeout(loopTimer); loopTimer = null; }
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    if (videoEl) { videoEl.srcObject = null; videoEl = null; }
+    _hasTorch = false;
+    _torchOn = false;
+    offCanvas = null;
+    offCtx = null;
+  }
+
+  /**
+   * Toggle the device torch/flash.
+   * @param {boolean} on
+   * @returns {Promise<void>}
+   */
+  async function toggleFlash(on) {
+    if (!active || !_hasTorch || !stream) return;
+    const track = stream.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: on }] });
+      _torchOn = on;
+    } catch (err) {
+      console.warn('[CameraEngine] Torch control failed:', err);
+    }
+  }
+
+  return {
+    start,
+    stop,
+    toggleFlash,
+    get isActive() { return active; },
+    get hasTorch() { return _hasTorch; },
+    get isTorchOn() { return _torchOn; },
+  };
+})();
+
+/* ============================================================
+   4. UI CONTROLLER
    ============================================================ */
 
 const UI = (() => {
@@ -527,6 +699,10 @@ const UI = (() => {
   const modeThereminBtn = document.getElementById("modeThermin");
   const satHint = document.getElementById("satHint");
 
+  const cameraBtn = document.getElementById("cameraBtn");
+  const flashBtn = document.getElementById("flashBtn");
+  const cameraPreview = document.getElementById("cameraPreview");
+
   /**
    * Read current HSL values from sliders.
    * Returns normalised saturation and lightness (0..1).
@@ -540,18 +716,28 @@ const UI = (() => {
   }
 
   /**
-   * Update swatch, label, and info display.
+   * Update swatch, label, slider labels, and info display.
+   * Optionally also move the slider thumbs (used by camera feed).
+   * @param {object} hsl
+   * @param {boolean} [updateSliders=false] - when true, also sets slider .value
    */
-  function updateVisuals(hsl) {
+  function updateVisuals(hsl, updateSliders = false) {
     const satPct = Math.round(hsl.saturation * 100);
     const ligPct = Math.round(hsl.lightness * 100);
-    const hslStr = `hsl(${hsl.hue}, ${satPct}%, ${ligPct}%)`;
+    const hueRounded = Math.round(hsl.hue);
+    const hslStr = `hsl(${hueRounded}, ${satPct}%, ${ligPct}%)`;
 
     colorSwatch.style.background = hslStr;
     colorLabel.textContent = hslStr;
-    hueValue.textContent = `${hsl.hue}°`;
+    hueValue.textContent = `${hueRounded}°`;
     satValue.textContent = `${satPct}%`;
     ligValue.textContent = `${ligPct}%`;
+
+    if (updateSliders) {
+      hueSlider.value = hueRounded;
+      satSlider.value = satPct;
+      ligSlider.value = ligPct;
+    }
 
     // Info panel
     const freq = hueToFrequency(hsl.hue);
@@ -593,6 +779,78 @@ const UI = (() => {
   }
 
   /**
+   * Update camera button + preview visibility + slider interactivity.
+   * @param {boolean} active
+   */
+  function updateCameraUI(active) {
+    cameraBtn.setAttribute("aria-pressed", String(active));
+    cameraBtn.querySelector(".btn-icon").textContent = active ? "⏹" : "📷";
+    cameraBtn.querySelector(".btn-text").textContent = active ? "Stop Cam" : "Camera";
+
+    // Show/hide preview
+    cameraPreview.hidden = !active;
+
+    // Lock sliders while camera is active so the camera is the sole input source
+    hueSlider.disabled = active;
+    satSlider.disabled = active;
+    ligSlider.disabled = active;
+
+    // Flash button: show only if active AND device supports torch
+    if (active && CameraEngine.hasTorch) {
+      flashBtn.hidden = false;
+      flashBtn.disabled = false;
+    } else {
+      flashBtn.hidden = true;
+      flashBtn.disabled = true;
+      // Ensure torch is visually reset
+      flashBtn.setAttribute("aria-pressed", "false");
+      flashBtn.querySelector(".btn-icon").textContent = "⚡";
+      flashBtn.querySelector(".btn-text").textContent = "Flash";
+    }
+  }
+
+  /**
+   * Callback invoked by CameraEngine on every colour sample tick.
+   * Drives audio and refreshes visuals in real time.
+   * @param {{ hue: number, saturation: number, lightness: number }} hsl
+   */
+  function onCameraHSL(hsl) {
+    updateVisuals(hsl, true);
+    AudioEngine.update(hsl);
+  }
+
+  /**
+   * Handle camera toggle button click.
+   */
+  async function onCameraClick() {
+    if (CameraEngine.isActive) {
+      CameraEngine.stop();
+      updateCameraUI(false);
+    } else {
+      // Disable button while waiting for permission
+      cameraBtn.disabled = true;
+      const ok = await CameraEngine.start(cameraPreview, onCameraHSL);
+      cameraBtn.disabled = false;
+      if (ok) {
+        updateCameraUI(true);
+      }
+      // If permission denied, button stays in its original state (camera off)
+    }
+  }
+
+  /**
+   * Handle flash toggle button click.
+   */
+  async function onFlashClick() {
+    if (!CameraEngine.isActive || !CameraEngine.hasTorch) return;
+    const newState = !CameraEngine.isTorchOn;
+    await CameraEngine.toggleFlash(newState);
+    flashBtn.setAttribute("aria-pressed", String(newState));
+    flashBtn.querySelector(".btn-icon").textContent = newState ? "🔦" : "⚡";
+    flashBtn.querySelector(".btn-text").textContent = newState ? "Flash On" : "Flash";
+  }
+
+  /**
    * Handle sound mode button click.
    * Always updates mode buttons to reflect the actual resulting mode,
    * so the UI stays consistent even if audio graph building fails.
@@ -604,8 +862,10 @@ const UI = (() => {
 
   /**
    * Handle any slider change.
+   * Ignored while camera is active (camera is the sole source of truth).
    */
   function onSliderChange() {
+    if (CameraEngine.isActive) return;
     const hsl = getHSL();
     updateVisuals(hsl);
     AudioEngine.update(hsl);
@@ -670,6 +930,9 @@ const UI = (() => {
     modeBellBtn.addEventListener("click", () => onModeClick('bell'));
     modeThereminBtn.addEventListener("click", () => onModeClick('theremin'));
 
+    cameraBtn.addEventListener("click", onCameraClick);
+    flashBtn.addEventListener("click", onFlashClick);
+
     document.addEventListener("visibilitychange", onVisibilityChange);
   }
 
@@ -677,7 +940,7 @@ const UI = (() => {
 })();
 
 /* ============================================================
-   4. BOOTSTRAP
+   5. BOOTSTRAP
    ============================================================ */
 document.addEventListener("DOMContentLoaded", () => {
   UI.init();

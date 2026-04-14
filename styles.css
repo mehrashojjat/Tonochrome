@@ -331,6 +331,48 @@ body {
   font-weight: 600;
 }
 
+/* ---------- Camera section ---------- */
+.camera-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.camera-controls {
+  display: flex;
+  gap: 0.75rem;
+}
+
+/* Camera button active (live) state */
+.btn-camera[aria-pressed="true"] {
+  background: rgba(255, 68, 68, 0.12);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Flash button active state */
+.btn-flash[aria-pressed="true"] {
+  background: rgba(255, 220, 0, 0.12);
+  border-color: #ffd700;
+  color: #ffd700;
+}
+
+.camera-preview {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: #000;
+  display: block;
+}
+
+/* Slider visual feedback when camera is active */
+.slider:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* ---------- Focus ring ---------- */
 .slider:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 3px var(--accent);
