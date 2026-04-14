@@ -118,6 +118,21 @@ body {
   display: none;
 }
 
+/* Split view: camera on left half, colour swatch on right half */
+.swatch-wrapper.camera-active .camera-preview {
+  width: 50%;
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.swatch-wrapper.camera-active .color-swatch {
+  margin-left: 50%;
+  width: 50%;
+  border-left: none;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  transition: none; /* instant colour update when camera is driving it */
+}
+
 /* Overlay action buttons (camera toggle + flash) */
 .swatch-actions {
   position: absolute;

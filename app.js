@@ -560,19 +560,33 @@ const CameraEngine = (() => {
   let loopTimer = null;
   let onHSLCallback = null;
 
-  /** Extract a single average-colour HSL from the current video frame. */
+  /**
+   * Extract a single average-colour HSL from the current video frame.
+   *
+   * Each pixel is converted to HSL individually, then:
+   *   – hue is averaged using circular statistics (sin/cos) to correctly
+   *     handle the 0°/360° wrap-around and avoid bias toward grey.
+   *   – saturation and lightness are averaged arithmetically.
+   *
+   * This is far more accurate than averaging RGB channels first, which
+   * would produce near-grey results for scenes with complementary colours.
+   */
   function sampleFrame() {
     if (!offCtx || !videoEl || videoEl.readyState < 2) return null;
     offCtx.drawImage(videoEl, 0, 0, SAMPLE_W, SAMPLE_H);
     const { data } = offCtx.getImageData(0, 0, SAMPLE_W, SAMPLE_H);
     const pixels = SAMPLE_W * SAMPLE_H;
-    let rSum = 0, gSum = 0, bSum = 0;
+    let sinSum = 0, cosSum = 0, sSum = 0, lSum = 0;
     for (let i = 0; i < data.length; i += 4) {
-      rSum += data[i];
-      gSum += data[i + 1];
-      bSum += data[i + 2];
+      const { hue, saturation, lightness } = rgbToHsl(data[i], data[i + 1], data[i + 2]);
+      const rad = hue * Math.PI / 180;
+      sinSum += Math.sin(rad);
+      cosSum += Math.cos(rad);
+      sSum += saturation;
+      lSum += lightness;
     }
-    return rgbToHsl(rSum / pixels, gSum / pixels, bSum / pixels);
+    const avgHue = (Math.atan2(sinSum / pixels, cosSum / pixels) * 180 / Math.PI + 360) % 360;
+    return { hue: avgHue, saturation: sSum / pixels, lightness: lSum / pixels };
   }
 
   /** Recurring sample loop — runs while `active` is true. */
@@ -711,6 +725,7 @@ const UI = (() => {
   const cameraBtn = document.getElementById("cameraBtn");
   const flashBtn = document.getElementById("flashBtn");
   const cameraPreview = document.getElementById("cameraPreview");
+  const swatchWrapper = document.querySelector(".swatch-wrapper");
 
   /**
    * Read current HSL values from sliders.
@@ -801,9 +816,10 @@ const UI = (() => {
     cameraBtn.querySelector("span").textContent = active ? "🎨" : "📷";
     cameraBtn.setAttribute("aria-label", active ? "Switch to color mode" : "Switch to camera input");
 
-    // Toggle swatch vs camera viewport
-    colorSwatch.hidden = active;
+    // Split view: camera on left half, colour swatch on right half
+    swatchWrapper.classList.toggle("camera-active", active);
     cameraPreview.hidden = !active;
+    // colorSwatch stays visible at all times — it becomes the right-half colour panel
 
     // Lock sliders while camera is active so the camera is the sole input source
     hueSlider.disabled = active;
