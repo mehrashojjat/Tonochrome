@@ -583,7 +583,22 @@ const CameraEngine = (() => {
    */
   function sampleFrame() {
     if (!offCtx || !videoEl || videoEl.readyState < 2) return null;
-    offCtx.drawImage(videoEl, 0, 0, SAMPLE_W, SAMPLE_H);
+
+    // Compute the source rectangle that is actually visible in the viewport,
+    // mirroring the browser's object-fit:cover behaviour:
+    //   scale = max(displayW / videoW, displayH / videoH)
+    //   visible source region is centred inside the intrinsic frame.
+    const vW = videoEl.videoWidth  || SAMPLE_W;
+    const vH = videoEl.videoHeight || SAMPLE_H;
+    const dW = videoEl.clientWidth  || vW;
+    const dH = videoEl.clientHeight || vH;
+    const scale   = Math.max(dW / vW, dH / vH);
+    const srcW    = dW / scale;
+    const srcH    = dH / scale;
+    const srcX    = (vW - srcW) / 2;
+    const srcY    = (vH - srcH) / 2;
+
+    offCtx.drawImage(videoEl, srcX, srcY, srcW, srcH, 0, 0, SAMPLE_W, SAMPLE_H);
     const { data } = offCtx.getImageData(0, 0, SAMPLE_W, SAMPLE_H);
     const pixels = SAMPLE_W * SAMPLE_H;
     let sinSum = 0, cosSum = 0, sSum = 0, lSum = 0;
