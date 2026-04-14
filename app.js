@@ -598,7 +598,7 @@ const CameraEngine = (() => {
     offCanvas = document.createElement('canvas');
     offCanvas.width = SAMPLE_W;
     offCanvas.height = SAMPLE_H;
-    offCtx = offCanvas.getContext('2d');
+    offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
 
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -614,6 +614,14 @@ const CameraEngine = (() => {
     }
 
     videoEl.srcObject = stream;
+
+    // iOS Safari requires an explicit play() call after setting srcObject;
+    // the autoplay attribute alone is not sufficient on iOS.
+    try {
+      await videoEl.play();
+    } catch (playErr) {
+      console.warn('[CameraEngine] Video play failed:', playErr);
+    }
 
     // Detect torch capability (only available after stream is granted)
     const track = stream.getVideoTracks()[0];

@@ -87,6 +87,9 @@ body {
 .swatch-wrapper {
   position: relative;
   width: 100%;
+  /* Explicit height so the wrapper never collapses to 0 when the swatch
+     div is hidden (the video is position:absolute and relies on this height) */
+  height: 80px;
 }
 
 .color-swatch {
