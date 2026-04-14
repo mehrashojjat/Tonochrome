@@ -687,6 +687,7 @@ const UI = (() => {
   const hueSlider = document.getElementById("hueSlider");
   const satSlider = document.getElementById("saturationSlider");
   const ligSlider = document.getElementById("lightnessSlider");
+  const satTrack = document.getElementById("saturationTrack");
 
   const hueValue = document.getElementById("hueValue");
   const satValue = document.getElementById("saturationValue");
@@ -740,6 +741,10 @@ const UI = (() => {
     hueValue.textContent = `${hueRounded}°`;
     satValue.textContent = `${satPct}%`;
     ligValue.textContent = `${ligPct}%`;
+
+    // Keep the saturation track gradient in sync with the current hue
+    satTrack.style.background =
+      `linear-gradient(to right, hsl(${hueRounded}, 0%, 45%), hsl(${hueRounded}, 100%, 50%))`;
 
     if (updateSliders) {
       hueSlider.value = hueRounded;
