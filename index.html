@@ -14,7 +14,37 @@
       </header>
 
       <section class="color-preview" aria-label="Color preview">
-        <div class="color-swatch" id="colorSwatch"></div>
+        <div class="swatch-wrapper">
+          <div class="color-swatch" id="colorSwatch"></div>
+          <video
+            class="camera-preview"
+            id="cameraPreview"
+            autoplay
+            muted
+            playsinline
+            hidden
+            aria-label="Camera preview"
+          ></video>
+          <div class="swatch-actions">
+            <button
+              class="btn-swatch"
+              id="cameraBtn"
+              aria-pressed="false"
+              aria-label="Switch to camera input"
+            >
+              <span aria-hidden="true">📷</span>
+            </button>
+            <button
+              class="btn-swatch btn-swatch-flash"
+              id="flashBtn"
+              aria-pressed="false"
+              hidden
+              aria-label="Toggle flash"
+            >
+              <span aria-hidden="true">⚡</span>
+            </button>
+          </div>
+        </div>
         <p class="color-label" id="colorLabel">hsl(0, 100%, 50%)</p>
       </section>
 
@@ -104,28 +134,6 @@
           <span class="btn-icon" aria-hidden="true">〜</span>
           <span class="btn-text">Theremin</span>
         </button>
-      </section>
-
-      <section class="camera-section" aria-label="Camera input">
-        <div class="camera-controls">
-          <button class="btn btn-camera" id="cameraBtn" aria-pressed="false">
-            <span class="btn-icon" aria-hidden="true">📷</span>
-            <span class="btn-text">Camera</span>
-          </button>
-          <button class="btn btn-flash" id="flashBtn" aria-pressed="false" disabled hidden>
-            <span class="btn-icon" aria-hidden="true">⚡</span>
-            <span class="btn-text">Flash</span>
-          </button>
-        </div>
-        <video
-          class="camera-preview"
-          id="cameraPreview"
-          autoplay
-          muted
-          playsinline
-          hidden
-          aria-label="Camera preview"
-        ></video>
       </section>
 
       <section class="mapping-info" aria-label="Mapping information">

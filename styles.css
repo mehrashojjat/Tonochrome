@@ -84,6 +84,11 @@ body {
   gap: 0.75rem;
 }
 
+.swatch-wrapper {
+  position: relative;
+  width: 100%;
+}
+
 .color-swatch {
   width: 100%;
   height: 80px;
@@ -91,6 +96,76 @@ body {
   background: hsl(0, 100%, 50%);
   border: 1px solid var(--border);
   transition: background var(--transition-smooth);
+}
+
+/* Camera viewport — overlays the swatch when active */
+.camera-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: #000;
+}
+
+/* Ensure [hidden] is respected even though we set display properties above */
+.camera-preview[hidden] {
+  display: none;
+}
+
+/* Overlay action buttons (camera toggle + flash) */
+.swatch-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+  z-index: 1;
+}
+
+.btn-swatch {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.btn-swatch:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.btn-swatch:active {
+  background: rgba(0, 0, 0, 0.9);
+}
+
+.btn-swatch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Camera button — active (live) state: accent ring */
+.btn-swatch[aria-pressed="true"] {
+  background: rgba(200, 255, 0, 0.2);
+  border-color: var(--accent);
+}
+
+/* Flash button — active (torch on) state */
+.btn-swatch-flash[aria-pressed="true"] {
+  background: rgba(255, 220, 0, 0.2);
+  border-color: #ffd700;
 }
 
 .color-label {
@@ -331,43 +406,7 @@ body {
   font-weight: 600;
 }
 
-/* ---------- Camera section ---------- */
-.camera-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.camera-controls {
-  display: flex;
-  gap: 0.75rem;
-}
-
-/* Camera button active (live) state */
-.btn-camera[aria-pressed="true"] {
-  background: rgba(255, 68, 68, 0.12);
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-/* Flash button active state */
-.btn-flash[aria-pressed="true"] {
-  background: rgba(255, 220, 0, 0.12);
-  border-color: #ffd700;
-  color: #ffd700;
-}
-
-.camera-preview {
-  width: 100%;
-  max-height: 180px;
-  object-fit: cover;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: #000;
-  display: block;
-}
-
-/* Slider visual feedback when camera is active */
+/* Slider visual feedback when camera is active (read-only) */
 .slider:disabled {
   opacity: 0.45;
   cursor: not-allowed;

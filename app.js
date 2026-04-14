@@ -23,7 +23,7 @@
    ============================================================ */
 
 /**
- * Convert an average RGB colour (0–255 each channel) to HSL.
+ * Convert an average RGB color (0–255 each channel) to HSL.
  * Returns { hue: 0..360, saturation: 0..1, lightness: 0..1 }.
  *
  * @param {number} r - 0..255
@@ -779,15 +779,17 @@ const UI = (() => {
   }
 
   /**
-   * Update camera button + preview visibility + slider interactivity.
+   * Update camera overlay button, video visibility, and slider interactivity.
    * @param {boolean} active
    */
   function updateCameraUI(active) {
     cameraBtn.setAttribute("aria-pressed", String(active));
-    cameraBtn.querySelector(".btn-icon").textContent = active ? "⏹" : "📷";
-    cameraBtn.querySelector(".btn-text").textContent = active ? "Stop Cam" : "Camera";
+    // Icon-only button — update the single <span> child
+    cameraBtn.querySelector("span").textContent = active ? "🎨" : "📷";
+    cameraBtn.setAttribute("aria-label", active ? "Switch to color mode" : "Switch to camera input");
 
-    // Show/hide preview
+    // Toggle swatch vs camera viewport
+    colorSwatch.hidden = active;
     cameraPreview.hidden = !active;
 
     // Lock sliders while camera is active so the camera is the sole input source
@@ -804,8 +806,7 @@ const UI = (() => {
       flashBtn.disabled = true;
       // Ensure torch is visually reset
       flashBtn.setAttribute("aria-pressed", "false");
-      flashBtn.querySelector(".btn-icon").textContent = "⚡";
-      flashBtn.querySelector(".btn-text").textContent = "Flash";
+      flashBtn.querySelector("span").textContent = "⚡";
     }
   }
 
@@ -846,8 +847,8 @@ const UI = (() => {
     const newState = !CameraEngine.isTorchOn;
     await CameraEngine.toggleFlash(newState);
     flashBtn.setAttribute("aria-pressed", String(newState));
-    flashBtn.querySelector(".btn-icon").textContent = newState ? "🔦" : "⚡";
-    flashBtn.querySelector(".btn-text").textContent = newState ? "Flash On" : "Flash";
+    flashBtn.querySelector("span").textContent = newState ? "🔦" : "⚡";
+    flashBtn.setAttribute("aria-label", newState ? "Turn off flash" : "Turn on flash");
   }
 
   /**
