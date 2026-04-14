@@ -71,33 +71,43 @@ function hueToFrequency(hue) {
 }
 
 /**
- * Saturation → Noise gain (inverted, full range)
- * Low saturation (grey) = full noise (1.0); high saturation (vivid) = no noise (0).
- * Uses a square-root curve so the transition feels natural.
+ * Saturation → Noise gain
+ * Noise is active from sat = 0 up to NOISE_CEIL (0.70); above that it is
+ * silent.  The peak noise level is capped at 0.5 (50% blend) so the tone
+ * is always at least half the mix.
  *
- *   sat = 0   → noise = 1.0 (100%)
- *   sat = 1   → noise = 0
+ *   sat = 0         → noise = 0.5  (50% blend)
+ *   sat = NOISE_CEIL → noise = 0
+ *   sat > NOISE_CEIL → noise = 0
  *
  * @param {number} saturation - 0..1
- * @returns {number} noise gain 0..1.0
+ * @returns {number} noise gain 0..0.5
  */
+const NOISE_CEIL = 0.70;   // saturation above which noise is fully silent
+const NOISE_MAX  = 0.50;   // maximum noise gain (50% blend)
+
 function saturationToNoiseGain(saturation) {
-  return Math.sqrt(1 - saturation);
+  if (saturation >= NOISE_CEIL) return 0;
+  // normalise to 0..1 within the active range, then invert with sqrt curve
+  const t = saturation / NOISE_CEIL;
+  return NOISE_MAX * Math.sqrt(1 - t);
 }
 
 /**
- * Saturation → Oscillator gain (complement of noise, full range)
- * Low saturation = noise dominant, osc silent;
- * high saturation = clean tone, osc at full volume.
+ * Saturation → Oscillator gain
+ * Ramps from 0 at sat = 0 to full (1.0) at sat = NOISE_CEIL, then stays
+ * at 1.0 above that (pure tone once noise is gone).
  *
- *   sat = 0   → osc gain = 0
- *   sat = 1   → osc gain = 1.0
+ *   sat = 0         → osc gain = 0
+ *   sat = NOISE_CEIL → osc gain = 1.0
+ *   sat > NOISE_CEIL → osc gain = 1.0
  *
  * @param {number} saturation - 0..1
  * @returns {number} oscillator gain 0..1.0
  */
 function saturationToOscGain(saturation) {
-  return Math.sqrt(saturation);
+  const t = Math.min(saturation / NOISE_CEIL, 1);
+  return Math.sqrt(t);
 }
 
 /**
