@@ -136,6 +136,7 @@ const AudioEngine = (() => {
   let noiseBuffer = null;
   let running = false;
   let muted = false;
+  let teardownTimer = null; // tracks the deferred teardown setTimeout from stop()
   const soundMode = 'theremin'; // fixed; bell is blended via lightness above L=0.5
   let lastHSL = { hue: 0, saturation: 1, lightness: 0.5 };
   let lfoOsc = null;  // Theremin vibrato LFO oscillator
@@ -338,6 +339,14 @@ const AudioEngine = (() => {
    */
   async function start(hsl) {
     if (running) return;
+    // If stop() was called recently and teardown is still pending (fade-out in
+    // progress), cancel the timer and clean up immediately so the new graph can
+    // be built on a clean slate.
+    if (teardownTimer !== null) {
+      clearTimeout(teardownTimer);
+      teardownTimer = null;
+    }
+    teardownGraph(); // safe no-op when all nodes are already null
     await ensureContext();
     buildGraph(hsl);
     lastHSL = { ...hsl };
@@ -349,17 +358,18 @@ const AudioEngine = (() => {
    */
   function stop() {
     if (!running) return;
-    // Fade out smoothly before stopping to avoid clicks
+    // Mark as stopped immediately so isRunning reflects the new state right
+    // away and rapid Play→Stop→Play clicks never get stuck.
+    running = false;
     if (masterGain) {
       const now = ctx.currentTime;
       masterGain.gain.setTargetAtTime(0, now, 0.03);
-      setTimeout(() => {
+      teardownTimer = setTimeout(() => {
         teardownGraph();
-        running = false;
+        teardownTimer = null;
       }, 150);
     } else {
       teardownGraph();
-      running = false;
     }
   }
 
