@@ -218,14 +218,30 @@ const AudioEngine = (() => {
     }
   }
 
+  /**
+   * Equal-power scale for the base voice as Bell blend increases.
+   * @param {number} lightness - 0..1
+   * @returns {number} scale 0..1
+   */
   function bellBlendBaseScale(lightness) {
     return Math.sqrt(1 - lightnessToBellBlend(lightness));
   }
 
+  /**
+   * Equal-power scale for the Bell harmonic layer from Lightness.
+   * @param {number} lightness - 0..1
+   * @returns {number} scale 0..1
+   */
   function bellBlendLayerScale(lightness) {
     return Math.sqrt(lightnessToBellBlend(lightness));
   }
 
+  /**
+   * Create and start Bell harmonic oscillators connected to masterGain.
+   * Also stores oscillator/gain references for realtime updates and teardown.
+   * @param {number} freq - fundamental frequency
+   * @param {number} gainScale - shared blend/saturation gain scale
+   */
   function createBellHarmonics(freq, gainScale) {
     BELL_HARMONICS.forEach((h) => {
       const osc = ctx.createOscillator();
