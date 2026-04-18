@@ -131,8 +131,8 @@ function lightnessToVolume(lightness) {
 
 /**
  * Lightness → Bell blend amount
- *   L = 0..0.5 => 0
- *   L = 0.5..1 => 0..1
+ *   L = 0..0.5 → 0
+ *   L = 0.5..1 → 0..1
  *
  * @param {number} lightness - 0..1
  * @returns {number} bell blend 0..1
@@ -1005,8 +1005,8 @@ const UI = (() => {
       const hsl = getHSL();
       try {
         await AudioEngine.start(hsl);
-      } catch (_) {
-        // Keep UI synced to real engine state if start fails.
+      } catch (err) {
+        console.error('[UI] Play start failed:', err);
       }
       updatePlayBtn(AudioEngine.isRunning);
       updateMuteBtn(AudioEngine.isRunning ? AudioEngine.isMuted : false);
