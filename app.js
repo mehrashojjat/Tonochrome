@@ -4,14 +4,17 @@
  *
  * Architecture
  * ─────────────────────────────────────────────────────────────
- *  OscillatorNode (sine)  ──► gainOsc ──┐
- *  AudioBufferSourceNode (noise) ──► gainNoise ──┤
+ *  lfoOsc (sine ~5 Hz) ──► lfoGain ──► oscillator.frequency
+ *  OscillatorNode (sine/theremin) ──► gainOsc ──┐
+ *  AudioBufferSourceNode (noise)  ──► gainNoise ──┤
+ *  bellBlendOscs[i] ──► bellBlendGains[i] ──► bellBlendMasterGain ──┤
  *                                              masterGain ──► DynamicsCompressorNode ──► destination
  *
  * Mapping rules
- *  Hue  (0–360)  → Frequency  110–880 Hz  (logarithmic / octave-loop)
- *  Sat  (0–1)    → Noise gain  1.0–0    (inverted full range: grey=100% noise, vivid=silent)
- *  Lig  (0–1)    → Master vol  0–0.80    (linear power curve: dark=silent, bright=loud)
+ *  Hue  (0–360)  → Frequency       110–880 Hz   (logarithmic / 3-octave)
+ *  Sat  (0–1)    → Noise blend      1.0–0        (inverted: grey=noise, vivid=tone)
+ *  Lig  (0–0.5)  → Master volume    0–0.80       (power curve 0.7; flat above 0.5)
+ *  Lig  (>0.5..1) → Bell blend       0–1.0        (square-root curve: just above 0.5=silent, max=full bell)
  *
  * The core mapping functions are pure (no DOM / Web Audio references)
  * so they can be reused in React Native or other environments.
@@ -75,10 +78,11 @@ function saturationToOscGain(saturation) {
 
 /**
  * Lightness → Master volume
- * Linear mapping: dark (L=0) is silent, bright (L=1) is loudest.
- * Uses a mild power curve for a more natural perceptual ramp.
+ * Volume ramps from 0 to MAX_VOL over L=0..0.5; stays flat above 0.5.
+ * The upper half of the slider is reserved for the bell-blend layer.
  *
  *   L = 0   → vol = 0
+ *   L = 0.5 → vol = MAX_VOL (0.80)
  *   L = 1   → vol = MAX_VOL (0.80)
  *
  * @param {number} lightness - 0..1
@@ -86,10 +90,30 @@ function saturationToOscGain(saturation) {
  */
 function lightnessToVolume(lightness) {
   const MAX_VOL = 0.80;
-  return MAX_VOL * Math.pow(lightness, 0.7);
+  const volL = Math.min(lightness, 0.5) * 2; // map [0..0.5] → [0..1], clamp above 0.5
+  return MAX_VOL * Math.pow(volL, 0.7);
 }
 
-/* Bell mode harmonic partials: ratio relative to fundamental and peak gain */
+/**
+ * Lightness → Bell blend gain
+ * Above L=0.5 the bell-harmonic layer fades in, mirroring how saturation
+ * blends noise.  Below or at 0.5 there is no bell blend.
+ *
+ *   L <= 0.5 → 0   (no bell)
+ *   L = 1.0  → 1.0 (full bell blend)
+ *
+ * Uses a square-root curve so the transition feels natural.
+ *
+ * @param {number} lightness - 0..1
+ * @returns {number} bell blend gain 0..1.0
+ */
+function lightnessToBellBlend(lightness) {
+  if (lightness <= 0.5) return 0;
+  return Math.sqrt((lightness - 0.5) * 2);
+}
+
+/* Bell harmonic partials: ratio relative to fundamental and peak gain.
+   Used by the lightness-driven bell blend layer. */
 const BELL_HARMONICS = [
   { ratio: 1,   gain: 1.00 }, // fundamental
   { ratio: 2,   gain: 0.50 }, // 1st overtone (octave)
@@ -112,12 +136,13 @@ const AudioEngine = (() => {
   let noiseBuffer = null;
   let running = false;
   let muted = false;
-  let soundMode = 'synth'; // 'synth' | 'bell' | 'theremin'
+  const soundMode = 'theremin'; // fixed; bell is blended via lightness above L=0.5
   let lastHSL = { hue: 0, saturation: 1, lightness: 0.5 };
-  let harmonicOscs = [];
-  let harmonicGains = []; // array of { node: GainNode, baseGain: number }
   let lfoOsc = null;  // Theremin vibrato LFO oscillator
   let lfoGain = null; // Theremin vibrato depth gain
+  let bellBlendOscs = [];          // harmonic oscillators for the L-driven bell blend layer
+  let bellBlendGains = [];         // { node: GainNode, baseGain: number }
+  let bellBlendMasterGain = null;  // controls overall bell blend depth
 
   // Ramp time for smooth parameter changes (avoids clicks/pops)
   const RAMP_TIME = 0.025; // seconds
@@ -166,89 +191,25 @@ const AudioEngine = (() => {
   }
 
   /**
-   * Build the audio graph.
-   * Called once per play session.
+   * Add the bell-blend layer on top of the existing graph.
+   * Harmonic oscillators whose combined level is controlled by
+   * lightnessToBellBlend(hsl.lightness), so the blend fades in when L > 0.5.
+   * Individual harmonic gains are also scaled by saturation so the blend
+   * sounds identical to the standalone Bell mode.
+   *
+   * Graph (added to an already-wired masterGain):
+   *   bellHarmonicOsc[i] ──► bellBlendGains[i] ──► bellBlendMasterGain ──► masterGain
+   *
+   * @param {object} hsl - { hue, saturation, lightness }
    */
-  function buildSynthGraph(hsl) {
-    createNoiseBuffer();
-
-    // Oscillator (sine — clean, neutral)
-    oscillator = ctx.createOscillator();
-    oscillator.type = "sine";
-    oscillator.frequency.value = hueToFrequency(hsl.hue);
-
-    // Noise source (looping buffer)
-    noiseSource = ctx.createBufferSource();
-    noiseSource.buffer = noiseBuffer;
-    noiseSource.loop = true;
-
-    // Gain nodes
-    gainOsc = ctx.createGain();
-    gainOsc.gain.value = saturationToOscGain(hsl.saturation);
-
-    gainNoise = ctx.createGain();
-    gainNoise.gain.value = saturationToNoiseGain(hsl.saturation);
-
-    masterGain = ctx.createGain();
-    masterGain.gain.value = muted ? 0 : lightnessToVolume(hsl.lightness);
-
-    // Limiter/compressor — prevents clipping
-    compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -6;
-    compressor.knee.value = 6;
-    compressor.ratio.value = 4;
-    compressor.attack.value = 0.003;
-    compressor.release.value = 0.15;
-
-    // Connect graph
-    oscillator.connect(gainOsc);
-    noiseSource.connect(gainNoise);
-    gainOsc.connect(masterGain);
-    gainNoise.connect(masterGain);
-    masterGain.connect(compressor);
-    compressor.connect(ctx.destination);
-
-    // Start sources
-    oscillator.start();
-    noiseSource.start();
-  }
-
-  /**
-   * Build the bell/piano audio graph using additive harmonic synthesis
-   * layered with the same pink-noise path as Synth mode.
-   * Saturation low  → noisy (grey, distressed bell)
-   * Saturation high → clean harmonics (vivid, pure bell/piano tone)
-   */
-  function buildBellGraph(hsl) {
-    createNoiseBuffer();
-
+  function buildBellBlendLayer(hsl) {
     const freq = hueToFrequency(hsl.hue);
 
-    // Noise source (same as Synth)
-    noiseSource = ctx.createBufferSource();
-    noiseSource.buffer = noiseBuffer;
-    noiseSource.loop = true;
+    bellBlendMasterGain = ctx.createGain();
+    bellBlendMasterGain.gain.value = lightnessToBellBlend(hsl.lightness);
+    bellBlendMasterGain.connect(masterGain);
 
-    gainNoise = ctx.createGain();
-    gainNoise.gain.value = saturationToNoiseGain(hsl.saturation);
-
-    masterGain = ctx.createGain();
-    masterGain.gain.value = muted ? 0 : lightnessToVolume(hsl.lightness);
-
-    compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -6;
-    compressor.knee.value = 6;
-    compressor.ratio.value = 4;
-    compressor.attack.value = 0.003;
-    compressor.release.value = 0.15;
-
-    noiseSource.connect(gainNoise);
-    gainNoise.connect(masterGain);
-    masterGain.connect(compressor);
-    compressor.connect(ctx.destination);
-
-    // Additive harmonic oscillators — gain scaled by saturation
-    BELL_HARMONICS.forEach((h, i) => {
+    BELL_HARMONICS.forEach((h) => {
       const osc = ctx.createOscillator();
       osc.type = 'sine';
       osc.frequency.value = freq * h.ratio;
@@ -257,26 +218,25 @@ const AudioEngine = (() => {
       g.gain.value = h.gain * saturationToOscGain(hsl.saturation);
 
       osc.connect(g);
-      g.connect(masterGain);
+      g.connect(bellBlendMasterGain);
       osc.start();
 
-      harmonicOscs.push(osc);
-      harmonicGains.push({ node: g, baseGain: h.gain });
+      bellBlendOscs.push(osc);
+      bellBlendGains.push({ node: g, baseGain: h.gain });
     });
-
-    noiseSource.start();
   }
 
   /**
    * Build the Theremin audio graph.
-   * A pure sine oscillator with LFO vibrato layered with the same
-   * pink-noise path as Synth/Bell so saturation noise works identically.
+   * A pure sine oscillator with LFO vibrato layered with pink noise
+   * (saturation controls the noise/tone balance) and a bell-blend layer
+   * (lightness above 0.5 fades in the bell harmonics).
    *
    * Graph:
    *   lfoOsc (sine ~5 Hz) ──► lfoGain (depth ≈ 1.2% of freq) ──► oscillator.frequency
    *   oscillator (sine) ──► gainOsc ──┐
-   *   noiseSource ──► gainNoise ───────┤
-   *                                masterGain ──► compressor ──► destination
+   *   noiseSource ──► gainNoise ───────┤──► masterGain ──► compressor ──► destination
+   *   bellBlendOscs[i] ──► bellBlendGains[i] ──► bellBlendMasterGain ──┘
    */
   function buildThereminGraph(hsl) {
     createNoiseBuffer();
@@ -302,7 +262,7 @@ const AudioEngine = (() => {
     gainOsc = ctx.createGain();
     gainOsc.gain.value = saturationToOscGain(hsl.saturation);
 
-    // Noise source (same as Synth/Bell)
+    // Noise source
     noiseSource = ctx.createBufferSource();
     noiseSource.buffer = noiseBuffer;
     noiseSource.loop = true;
@@ -327,22 +287,19 @@ const AudioEngine = (() => {
     masterGain.connect(compressor);
     compressor.connect(ctx.destination);
 
+    // Bell-blend layer (L > 0.5 fades in bell harmonics)
+    buildBellBlendLayer(hsl);
+
     oscillator.start();
     lfoOsc.start();
     noiseSource.start();
   }
 
   /**
-   * Dispatch to the appropriate graph builder based on current sound mode.
+   * Build the audio graph (always theremin with bell blend).
    */
   function buildGraph(hsl) {
-    if (soundMode === 'bell') {
-      buildBellGraph(hsl);
-    } else if (soundMode === 'theremin') {
-      buildThereminGraph(hsl);
-    } else {
-      buildSynthGraph(hsl);
-    }
+    buildThereminGraph(hsl);
   }
 
   /**
@@ -363,14 +320,15 @@ const AudioEngine = (() => {
     if (gainNoise) { gainNoise.disconnect(); gainNoise = null; }
     if (lfoOsc) { try { lfoOsc.stop(); } catch (_) {} lfoOsc.disconnect(); lfoOsc = null; }
     if (lfoGain) { lfoGain.disconnect(); lfoGain = null; }
-    if (masterGain) { masterGain.disconnect(); masterGain = null; }
-    if (compressor) { compressor.disconnect(); compressor = null; }
-    harmonicOscs.forEach(osc => {
+    if (bellBlendMasterGain) { bellBlendMasterGain.disconnect(); bellBlendMasterGain = null; }
+    bellBlendOscs.forEach(osc => {
       try { osc.stop(); } catch (_) {}
       osc.disconnect();
     });
-    harmonicOscs = [];
-    harmonicGains = [];
+    bellBlendOscs = [];
+    bellBlendGains = [];
+    if (masterGain) { masterGain.disconnect(); masterGain = null; }
+    if (compressor) { compressor.disconnect(); compressor = null; }
   }
 
   /**
@@ -414,45 +372,37 @@ const AudioEngine = (() => {
     lastHSL = { ...hsl };
     const now = ctx.currentTime;
 
-    if (soundMode === 'bell') {
-      const freq = hueToFrequency(hsl.hue);
-      const oscScale = saturationToOscGain(hsl.saturation);
-      harmonicOscs.forEach((osc, i) => {
-        osc.frequency.setTargetAtTime(freq * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
-      });
-      harmonicGains.forEach(h => {
-        h.node.gain.setTargetAtTime(h.baseGain * oscScale, now, RAMP_TIME);
-      });
-      if (gainNoise) {
-        gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
-      }
-    } else if (soundMode === 'theremin') {
-      const freq = hueToFrequency(hsl.hue);
-      if (oscillator) {
-        oscillator.frequency.setTargetAtTime(freq, now, RAMP_TIME);
-      }
-      // Update LFO vibrato depth to track the new fundamental frequency
-      if (lfoGain) {
-        lfoGain.gain.setTargetAtTime(freq * 0.012, now, RAMP_TIME);
-      }
-      if (gainNoise) {
-        gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
-      }
-      if (gainOsc) {
-        gainOsc.gain.setTargetAtTime(saturationToOscGain(hsl.saturation), now, RAMP_TIME);
-      }
-    } else {
-      if (oscillator) {
-        oscillator.frequency.setTargetAtTime(hueToFrequency(hsl.hue), now, RAMP_TIME);
-      }
-      if (gainNoise) {
-        gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
-      }
-      if (gainOsc) {
-        gainOsc.gain.setTargetAtTime(saturationToOscGain(hsl.saturation), now, RAMP_TIME);
-      }
+    const freq = hueToFrequency(hsl.hue);
+
+    // Theremin oscillator + LFO
+    if (oscillator) {
+      oscillator.frequency.setTargetAtTime(freq, now, RAMP_TIME);
+    }
+    if (lfoGain) {
+      lfoGain.gain.setTargetAtTime(freq * 0.012, now, RAMP_TIME);
     }
 
+    // Saturation controls noise/tone balance
+    if (gainNoise) {
+      gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
+    }
+    if (gainOsc) {
+      gainOsc.gain.setTargetAtTime(saturationToOscGain(hsl.saturation), now, RAMP_TIME);
+    }
+
+    // Bell blend layer (L > 0.5 fades in bell harmonics)
+    if (bellBlendMasterGain) {
+      bellBlendMasterGain.gain.setTargetAtTime(lightnessToBellBlend(hsl.lightness), now, RAMP_TIME);
+    }
+    const bellOscScale = saturationToOscGain(hsl.saturation);
+    bellBlendOscs.forEach((osc, i) => {
+      osc.frequency.setTargetAtTime(freq * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
+    });
+    bellBlendGains.forEach(h => {
+      h.node.gain.setTargetAtTime(h.baseGain * bellOscScale, now, RAMP_TIME);
+    });
+
+    // Master volume (ramps only over L=0..0.5)
     if (masterGain) {
       const targetVol = muted ? 0 : lightnessToVolume(hsl.lightness);
       masterGain.gain.setTargetAtTime(targetVol, now, RAMP_TIME);
@@ -472,30 +422,7 @@ const AudioEngine = (() => {
     masterGain.gain.setTargetAtTime(targetVol, now, RAMP_TIME);
   }
 
-  /**
-   * Switch sound mode ('synth' | 'bell' | 'theremin').
-   * If audio is running, tears down and rebuilds the graph in the new mode.
-   * If graph building fails, the mode is reverted to avoid an inconsistent state.
-   */
-  async function setMode(mode) {
-    if (mode === soundMode) return;
-    const previousMode = soundMode;
-    soundMode = mode;
-    if (running) {
-      teardownGraph();
-      running = false;
-      await ensureContext();
-      try {
-        buildGraph(lastHSL);
-        running = true;
-      } catch (err) {
-        console.error('[AudioEngine] Failed to build graph for mode "' + mode + '":', err);
-        soundMode = previousMode; // revert so UI stays consistent with audio state
-      }
-    }
-  }
-
-  return { start, stop, update, setMute, setMode, get isRunning() { return running; }, get isMuted() { return muted; }, get soundMode() { return soundMode; } };
+  return { start, stop, update, setMute, get isRunning() { return running; }, get isMuted() { return muted; } };
 })();
 
 /* ============================================================
@@ -521,11 +448,6 @@ const UI = (() => {
   const freqDisplay = document.getElementById("freqDisplay");
   const noiseDisplay = document.getElementById("noiseDisplay");
   const volDisplay = document.getElementById("volDisplay");
-
-  const modeSynthBtn = document.getElementById("modeSynth");
-  const modeBellBtn = document.getElementById("modeBell");
-  const modeThereminBtn = document.getElementById("modeThermin");
-  const satHint = document.getElementById("satHint");
 
   /**
    * Read current HSL values from sliders.
@@ -583,26 +505,6 @@ const UI = (() => {
   }
 
   /**
-   * Sync mode button appearance and saturation hint to current mode.
-   */
-  function updateModeButtons(mode) {
-    modeSynthBtn.setAttribute("aria-pressed", String(mode === 'synth'));
-    modeBellBtn.setAttribute("aria-pressed", String(mode === 'bell'));
-    modeThereminBtn.setAttribute("aria-pressed", String(mode === 'theremin'));
-    satHint.textContent = 'Controls noise texture';
-  }
-
-  /**
-   * Handle sound mode button click.
-   * Always updates mode buttons to reflect the actual resulting mode,
-   * so the UI stays consistent even if audio graph building fails.
-   */
-  async function onModeClick(mode) {
-    await AudioEngine.setMode(mode);
-    updateModeButtons(AudioEngine.soundMode);
-  }
-
-  /**
    * Handle any slider change.
    */
   function onSliderChange() {
@@ -657,7 +559,6 @@ const UI = (() => {
     updateVisuals(hsl);
     updatePlayBtn(false);
     updateMuteBtn(false);
-    updateModeButtons('synth');
 
     hueSlider.addEventListener("input", onSliderChange);
     satSlider.addEventListener("input", onSliderChange);
@@ -665,10 +566,6 @@ const UI = (() => {
 
     playBtn.addEventListener("click", onPlayClick);
     muteBtn.addEventListener("click", onMuteClick);
-
-    modeSynthBtn.addEventListener("click", () => onModeClick('synth'));
-    modeBellBtn.addEventListener("click", () => onModeClick('bell'));
-    modeThereminBtn.addEventListener("click", () => onModeClick('theremin'));
 
     document.addEventListener("visibilitychange", onVisibilityChange);
   }
