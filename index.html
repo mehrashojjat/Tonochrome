@@ -103,10 +103,10 @@
               max="100"
               value="50"
               step="1"
-              aria-label="Lightness (0–100%), controls volume"
+              aria-label="Lightness (0–100%), controls volume then bell blend"
             />
           </div>
-          <p class="control-hint">Controls volume</p>
+          <p class="control-hint">0–50: volume, 50–100: bell blend</p>
         </div>
       </section>
 
@@ -122,7 +122,7 @@
       </section>
 
       <section class="sound-mode" aria-label="Sound mode">
-        <button class="btn btn-mode" id="modeSynth" aria-pressed="true">
+        <button class="btn btn-mode" id="modeSynth" aria-pressed="false">
           <span class="btn-icon" aria-hidden="true">◈</span>
           <span class="btn-text">Synth</span>
         </button>
@@ -130,7 +130,7 @@
           <span class="btn-icon" aria-hidden="true">♪</span>
           <span class="btn-text">Bell</span>
         </button>
-        <button class="btn btn-mode" id="modeThermin" aria-pressed="false">
+        <button class="btn btn-mode" id="modeThermin" aria-pressed="true">
           <span class="btn-icon" aria-hidden="true">〜</span>
           <span class="btn-text">Theremin</span>
         </button>
