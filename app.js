@@ -825,9 +825,6 @@ const UI = (() => {
   const noiseDisplay = document.getElementById("noiseDisplay");
   const volDisplay = document.getElementById("volDisplay");
 
-  const modeSynthBtn = document.getElementById("modeSynth");
-  const modeBellBtn = document.getElementById("modeBell");
-  const modeThereminBtn = document.getElementById("modeTheremin");
   const satHint = document.getElementById("satHint");
 
   const cameraBtn = document.getElementById("cameraBtn");
@@ -905,16 +902,6 @@ const UI = (() => {
   }
 
   /**
-   * Sync mode button appearance and saturation hint to current mode.
-   */
-  function updateModeButtons(mode) {
-    modeSynthBtn.setAttribute("aria-pressed", String(mode === 'synth'));
-    modeBellBtn.setAttribute("aria-pressed", String(mode === 'bell'));
-    modeThereminBtn.setAttribute("aria-pressed", String(mode === 'theremin'));
-    satHint.textContent = 'Controls noise texture';
-  }
-
-  /**
    * Update camera overlay button, video visibility, and slider interactivity.
    * @param {boolean} active
    */
@@ -989,16 +976,6 @@ const UI = (() => {
   }
 
   /**
-   * Handle sound mode button click.
-   * Always updates mode buttons to reflect the actual resulting mode,
-   * so the UI stays consistent even if audio graph building fails.
-   */
-  async function onModeClick(mode) {
-    await AudioEngine.setMode(mode);
-    updateModeButtons(AudioEngine.soundMode);
-  }
-
-  /**
    * Handle any slider change.
    * Ignored while camera is active (camera is the sole source of truth).
    */
@@ -1059,7 +1036,6 @@ const UI = (() => {
     updateVisuals(hsl);
     updatePlayBtn(false);
     updateMuteBtn(false);
-    updateModeButtons('theremin');
 
     hueSlider.addEventListener("input", onSliderChange);
     satSlider.addEventListener("input", onSliderChange);
@@ -1067,10 +1043,6 @@ const UI = (() => {
 
     playBtn.addEventListener("click", onPlayClick);
     muteBtn.addEventListener("click", onMuteClick);
-
-    modeSynthBtn.addEventListener("click", () => onModeClick('synth'));
-    modeBellBtn.addEventListener("click", () => onModeClick('bell'));
-    modeThereminBtn.addEventListener("click", () => onModeClick('theremin'));
 
     cameraBtn.addEventListener("click", onCameraClick);
     flashBtn.addEventListener("click", onFlashClick);
