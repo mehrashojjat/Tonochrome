@@ -811,7 +811,7 @@ const UI = (() => {
 
   const modeSynthBtn = document.getElementById("modeSynth");
   const modeBellBtn = document.getElementById("modeBell");
-  const modeThereminBtn = document.getElementById("modeThermin");
+  const modeThereminBtn = document.getElementById("modeTheremin");
   const satHint = document.getElementById("satHint");
 
   const cameraBtn = document.getElementById("cameraBtn");
