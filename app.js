@@ -113,6 +113,12 @@ const FALLBACK_CONFIG = {
   synth: {
     waveform: 'sine',
   },
+  tone: {
+    filterType: 'lowpass',
+    filterFrequency: 20000,
+    filterQ: 0.0001,
+    drive: 1,
+  },
   sound: {
     character: 'default',
   },
@@ -187,16 +193,18 @@ const SOUND_CHARACTER_PRESETS = {
     theremin: { waveform: 'sine',     lfoRate: 5,   lfoDepthRatio: 0.012 },
     bell:     { inharmonicRatio: 4.2, brightness: 1 },
     noise:    { bellResonanceBoost: 1.2 },
+    tone:     { filterType: 'lowpass', filterFrequency: 20000, filterQ: 0.0001, drive: 1 },
   },
   piano: {
     label: 'Piano',
-    // Triangle wave: rich in odd harmonics (1, 3, 5…) — noticeably different from sine.
-    // Very high brightness + bellResonanceBoost recreate the overtone ring of piano strings.
+    // Triangle wave: rich in odd harmonics, clearly different from sine.
+    // Strong overtone ring + subtle drive for hammer-string character.
     // Near-zero vibrato: piano keys produce no mechanical vibrato.
     synth:    { waveform: 'triangle' },
     theremin: { waveform: 'triangle', lfoRate: 1,   lfoDepthRatio: 0.001 },
     bell:     { inharmonicRatio: 4.8, brightness: 4.5 },
     noise:    { bellResonanceBoost: 5.5 },
+    tone:     { filterType: 'lowpass', filterFrequency: 4600, filterQ: 1.1, drive: 1.35 },
   },
   strings: {
     label: 'Strings',
@@ -204,6 +212,7 @@ const SOUND_CHARACTER_PRESETS = {
     theremin: { waveform: 'sawtooth', lfoRate: 5.5, lfoDepthRatio: 0.020 },
     bell:     { inharmonicRatio: 4.2, brightness: 0.5 },
     noise:    { bellResonanceBoost: 0.6 },
+    tone:     { filterType: 'lowpass', filterFrequency: 20000, filterQ: 0.0001, drive: 1 },
   },
   organ: {
     label: 'Organ',
@@ -211,6 +220,7 @@ const SOUND_CHARACTER_PRESETS = {
     theremin: { waveform: 'square',   lfoRate: 5,   lfoDepthRatio: 0.007 },
     bell:     { inharmonicRatio: 4.2, brightness: 0.4 },
     noise:    { bellResonanceBoost: 0.3 },
+    tone:     { filterType: 'lowpass', filterFrequency: 20000, filterQ: 0.0001, drive: 1 },
   },
   flute: {
     label: 'Flute',
@@ -221,6 +231,39 @@ const SOUND_CHARACTER_PRESETS = {
     theremin: { waveform: 'sine',     lfoRate: 5.5, lfoDepthRatio: 0.048 },
     bell:     { inharmonicRatio: 4.2, brightness: 0.05 },
     noise:    { bellResonanceBoost: 0.05 },
+    tone:     { filterType: 'highpass', filterFrequency: 450, filterQ: 0.8, drive: 1.02 },
+  },
+  brass: {
+    label: 'Brass',
+    synth:    { waveform: 'sawtooth' },
+    theremin: { waveform: 'sawtooth', lfoRate: 3.8, lfoDepthRatio: 0.015 },
+    bell:     { inharmonicRatio: 3.8, brightness: 1.8 },
+    noise:    { bellResonanceBoost: 2.1 },
+    tone:     { filterType: 'bandpass', filterFrequency: 1200, filterQ: 0.9, drive: 1.9 },
+  },
+  bass: {
+    label: 'Bass',
+    synth:    { waveform: 'square' },
+    theremin: { waveform: 'square', lfoRate: 2.2, lfoDepthRatio: 0.006 },
+    bell:     { inharmonicRatio: 2.4, brightness: 0.18 },
+    noise:    { bellResonanceBoost: 0.2 },
+    tone:     { filterType: 'lowpass', filterFrequency: 520, filterQ: 1.0, drive: 1.9 },
+  },
+  glass: {
+    label: 'Glass',
+    synth:    { waveform: 'triangle' },
+    theremin: { waveform: 'triangle', lfoRate: 6.8, lfoDepthRatio: 0.010 },
+    bell:     { inharmonicRatio: 6.2, brightness: 6.0 },
+    noise:    { bellResonanceBoost: 3.8 },
+    tone:     { filterType: 'highpass', filterFrequency: 1100, filterQ: 1.2, drive: 1.08 },
+  },
+  chip: {
+    label: 'Chip',
+    synth:    { waveform: 'square' },
+    theremin: { waveform: 'square', lfoRate: 0.8, lfoDepthRatio: 0.0008 },
+    bell:     { inharmonicRatio: 2.0, brightness: 0.1 },
+    noise:    { bellResonanceBoost: 0.15 },
+    tone:     { filterType: 'highpass', filterFrequency: 900, filterQ: 0.7, drive: 2.2 },
   },
 };
 
@@ -410,6 +453,8 @@ const AudioEngine = (() => {
   let harmonicGainsB = []; // bell layer for blend voice (freqB, hue 270°–360°)
   let lfoOsc = null;  // Theremin vibrato LFO oscillator
   let lfoGain = null; // Theremin vibrato depth gain
+  let toneFilter = null; // optional tonal path filter (does not process raw L-noise)
+  let toneDrive = null;  // optional tonal path waveshaper (does not process raw L-noise)
   let noiseBellFilters = [];  // bandpass filters for noise bell resonance (one per harmonic)
   let gainNoiseWets = [];     // additive gain nodes for each filtered noise harmonic
 
@@ -484,6 +529,50 @@ const AudioEngine = (() => {
     source.buffer = getNoiseBuffer(noiseType);
     source.loop = true;
     return source;
+  }
+
+  function createDriveCurve(drive) {
+    const n = 1024;
+    const curve = new Float32Array(n);
+    const k = Math.max(1, drive);
+    const norm = Math.tanh(k);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(k * x) / norm;
+    }
+    return curve;
+  }
+
+  // Connect only the tonal path (H-driven oscillators/harmonics) through optional tone shaping.
+  // Raw noise driven by L stays directly connected to masterGain.
+  function connectTonalPath(sourceNode) {
+    const toneCfg = CONFIG.tone || {};
+    const filterType = toneCfg.filterType || 'lowpass';
+    const filterFrequency = Math.min(Math.max(Number(toneCfg.filterFrequency) || 20000, 40), 20000);
+    const filterQ = Math.max(Number(toneCfg.filterQ) || 0.0001, 0.0001);
+    const drive = Math.max(Number(toneCfg.drive) || 1, 1);
+
+    let node = sourceNode;
+
+    // Skip neutral lowpass@20k to keep default signal path unchanged.
+    if (!(filterType === 'lowpass' && filterFrequency >= 19950)) {
+      toneFilter = ctx.createBiquadFilter();
+      toneFilter.type = filterType;
+      toneFilter.frequency.value = filterFrequency;
+      toneFilter.Q.value = filterQ;
+      node.connect(toneFilter);
+      node = toneFilter;
+    }
+
+    if (drive > 1.01) {
+      toneDrive = ctx.createWaveShaper();
+      toneDrive.curve = createDriveCurve(drive);
+      toneDrive.oversample = '4x';
+      node.connect(toneDrive);
+      node = toneDrive;
+    }
+
+    node.connect(masterGain);
   }
 
   /**
@@ -626,7 +715,7 @@ const AudioEngine = (() => {
     oscillator2.connect(gainOsc2);
     gainOsc.connect(gainOscVolume);
     gainOsc2.connect(gainOscVolume);
-    gainOscVolume.connect(masterGain);
+    connectTonalPath(gainOscVolume);
     noiseSourceUpper.connect(gainNoiseUpper);
     noiseSourceLower.connect(gainNoiseLower);
     noiseSourceBell.connect(gainNoiseBell);
@@ -690,7 +779,7 @@ const AudioEngine = (() => {
     compressor.attack.value = 0.003;
     compressor.release.value = 0.15;
 
-    gainOscVolume.connect(masterGain);
+    connectTonalPath(gainOscVolume);
     noiseSourceUpper.connect(gainNoiseUpper);
     noiseSourceLower.connect(gainNoiseLower);
     noiseSourceBell.connect(gainNoiseBell);
@@ -786,7 +875,7 @@ const AudioEngine = (() => {
     oscillator2.connect(gainOsc2);
     gainOsc.connect(gainOscVolume);
     gainOsc2.connect(gainOscVolume);
-    gainOscVolume.connect(masterGain);
+    connectTonalPath(gainOscVolume);
     noiseSourceUpper.connect(gainNoiseUpper);
     noiseSourceLower.connect(gainNoiseLower);
     noiseSourceBell.connect(gainNoiseBell);
@@ -856,6 +945,8 @@ const AudioEngine = (() => {
     gainNoiseWets = [];
     if (lfoOsc) { try { lfoOsc.stop(); } catch (_) {} lfoOsc.disconnect(); lfoOsc = null; }
     if (lfoGain) { lfoGain.disconnect(); lfoGain = null; }
+    if (toneFilter) { toneFilter.disconnect(); toneFilter = null; }
+    if (toneDrive) { toneDrive.disconnect(); toneDrive = null; }
     if (masterGain) { masterGain.disconnect(); masterGain = null; }
     if (compressor) { compressor.disconnect(); compressor = null; }
     harmonicOscs.forEach(osc => {
@@ -1501,6 +1592,14 @@ const UI = (() => {
       '  // Synth mode oscillator waveform (used in Synth sound mode).',
       '  "synth": {',
       `    "waveform": ${JSON.stringify(C.synth ? C.synth.waveform : 'sine')}`,
+      '  },',
+      '',
+      '  // Tonal shaping for H-driven oscillators and harmonics only (raw L noise is not affected).',
+      '  "tone": {',
+      `    "filterType": ${JSON.stringify(C.tone ? C.tone.filterType : 'lowpass')},`,
+      `    "filterFrequency": ${C.tone ? C.tone.filterFrequency : 20000},`,
+      `    "filterQ": ${C.tone ? C.tone.filterQ : 0.0001},`,
+      `    "drive": ${C.tone ? C.tone.drive : 1}`,
       '  }',
       '}',
     ].join('\n');
