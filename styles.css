@@ -905,6 +905,11 @@ body {
   border-color: #ffd700;
 }
 
+.btn-flash:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .btn-flash[hidden] { display: none !important; }
 
 /* Bottom half — color + info + playback */

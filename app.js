@@ -1620,6 +1620,26 @@ const BlindModeController = (() => {
     if (text) text.textContent = _muted ? 'Unmute' : 'Mute';
   }
 
+  function _announceBlind(msg) {
+    const e = el();
+    if (!e.sr) return;
+    e.sr.textContent = '';
+    setTimeout(() => { e.sr.textContent = msg; }, 40);
+  }
+
+  function _syncFlashBtn() {
+    const e = el();
+    if (!e.flash) return;
+    const on = CameraEngine.isTorchOn;
+    const available = CameraEngine.hasTorch;
+    e.flash.disabled = !available;
+    e.flash.setAttribute('aria-pressed', String(on));
+    e.flash.setAttribute(
+      'aria-label',
+      available ? (on ? 'Turn flash off' : 'Turn flash on') : 'Flash unavailable on this device'
+    );
+  }
+
   function enter() {
     const e = el();
     _playing = false;
@@ -1627,11 +1647,32 @@ const BlindModeController = (() => {
     _syncPlayBtn();
     _syncMuteBtn();
 
-    // Flash button visibility
-    if (e.flash) e.flash.hidden = !CameraEngine.hasTorch;
+    // Flash button is always visible for discoverability; disable when unavailable.
+    if (e.flash) {
+      e.flash.hidden = false;
+      e.flash.disabled = true;
+      e.flash.setAttribute('aria-pressed', 'false');
+      e.flash.setAttribute('aria-label', 'Checking flash availability');
+    }
 
-    // Start camera — must come before play button wiring so _lastHSL is populated ASAP
-    CameraEngine.start(e.video, _onHSL);
+    // Start camera first, then update flash availability.
+    CameraEngine.start(e.video, _onHSL).then((ok) => {
+      if (!ok) {
+        _announceBlind('Camera access was not granted.');
+        return;
+      }
+      if (!e.flash) return;
+      const hasTorch = CameraEngine.hasTorch;
+      e.flash.hidden = false;
+      e.flash.disabled = !hasTorch;
+      if (hasTorch) {
+        _syncFlashBtn();
+        _announceBlind('Flash control is available at the top right.');
+      } else {
+        _syncFlashBtn();
+        _announceBlind('Flash is not available on this device.');
+      }
+    });
 
     // Wire play/stop
     if (e.playBtn) {
@@ -1660,9 +1701,15 @@ const BlindModeController = (() => {
 
     // Wire flash
     if (e.flash) {
-      e.flash.onclick = () => {
-        CameraEngine.toggleTorch();
-        e.flash.setAttribute('aria-pressed', String(CameraEngine.isTorchOn));
+      e.flash.onclick = async () => {
+        if (!CameraEngine.hasTorch) {
+          _announceBlind('Flash is unavailable on this device.');
+          return;
+        }
+        const next = !CameraEngine.isTorchOn;
+        await CameraEngine.toggleFlash(next);
+        _syncFlashBtn();
+        _announceBlind(next ? 'Flash on.' : 'Flash off.');
       };
     }
   }
@@ -1677,7 +1724,13 @@ const BlindModeController = (() => {
     const e = el();
     if (e.playBtn) e.playBtn.onclick = null;
     if (e.muteBtn) e.muteBtn.onclick = null;
-    if (e.flash)   e.flash.onclick   = null;
+    if (e.flash) {
+      e.flash.onclick = null;
+      e.flash.hidden = false;
+      e.flash.disabled = true;
+      e.flash.setAttribute('aria-pressed', 'false');
+      e.flash.setAttribute('aria-label', 'Checking flash availability');
+    }
     _syncPlayBtn();
     _syncMuteBtn();
   }
