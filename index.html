@@ -92,10 +92,10 @@
               max="100"
               value="100"
               step="1"
-              aria-label="Saturation (0–100%), controls noise texture"
+              aria-label="Saturation (0–100%), controls bell blend"
             />
           </div>
-          <p class="control-hint" id="satHint">Controls noise texture</p>
+          <p class="control-hint" id="satHint">Controls bell blend</p>
         </div>
 
         <div class="control-group">
@@ -112,11 +112,11 @@
               max="100"
               value="50"
               step="1"
-              aria-label="Lightness (0–100%), controls volume then bell blend"
+              aria-label="Lightness (0–100%), controls brown noise below mid, volume up to mid, and pink noise above mid"
               aria-describedby="ligHint"
             />
           </div>
-          <p class="control-hint" id="ligHint">0–50%: volume · 50–100%: bell blend</p>
+          <p class="control-hint" id="ligHint">0–50%: brown noise + volume · 50–100%: pink noise</p>
         </div>
       </section>
 
@@ -199,26 +199,14 @@
           <summary>Saturation Mapping</summary>
 
           <div class="dual-control" data-dual-range>
-            <label class="settings-label">Saturation Active Noise Range (0–1)</label>
+            <label class="settings-label">Bell Blend Saturation Range (0–1)</label>
             <div class="dual-track-wrap">
-              <input type="range" id="cfgSatNoiseStartRange" class="slider dual-slider" min="0" max="1" step="0.01" />
-              <input type="range" id="cfgSatNoiseEndRange" class="slider dual-slider" min="0" max="1" step="0.01" />
+              <input type="range" id="cfgSatBellStartRange" class="slider dual-slider" min="0" max="1" step="0.01" />
+              <input type="range" id="cfgSatBellEndRange" class="slider dual-slider" min="0" max="1" step="0.01" />
             </div>
             <div class="dual-values">
-              <input type="number" id="cfgSatNoiseStartInput" min="0" max="1" step="0.01" aria-label="Saturation noise start" />
-              <input type="number" id="cfgSatNoiseEndInput" min="0" max="1" step="0.01" aria-label="Saturation noise end" />
-            </div>
-          </div>
-
-          <div class="dual-control" data-dual-range>
-            <label class="settings-label">Noise Gain Range</label>
-            <div class="dual-track-wrap">
-              <input type="range" id="cfgNoiseGainMinRange" class="slider dual-slider" min="0" max="1" step="0.01" />
-              <input type="range" id="cfgNoiseGainMaxRange" class="slider dual-slider" min="0" max="1" step="0.01" />
-            </div>
-            <div class="dual-values">
-              <input type="number" id="cfgNoiseGainMinInput" min="0" max="1" step="0.01" aria-label="Noise gain minimum" />
-              <input type="number" id="cfgNoiseGainMaxInput" min="0" max="1" step="0.01" aria-label="Noise gain maximum" />
+              <input type="number" id="cfgSatBellStartInput" min="0" max="1" step="0.01" aria-label="Bell blend saturation start" />
+              <input type="number" id="cfgSatBellEndInput" min="0" max="1" step="0.01" aria-label="Bell blend saturation end" />
             </div>
           </div>
         </details>
@@ -251,14 +239,26 @@
           </div>
 
           <div class="dual-control" data-dual-range>
-            <label class="settings-label">Bell Blend Lightness Range (0–1)</label>
+            <label class="settings-label">Brown Noise Lightness Range (0–1)</label>
             <div class="dual-track-wrap">
-              <input type="range" id="cfgBellBlendStartRange" class="slider dual-slider" min="0" max="1" step="0.01" value="0.5" />
-              <input type="range" id="cfgBellBlendEndRange" class="slider dual-slider" min="0" max="1" step="0.01" value="1" />
+              <input type="range" id="cfgBrownNoiseStartRange" class="slider dual-slider" min="0" max="1" step="0.01" value="0" />
+              <input type="range" id="cfgBrownNoiseEndRange" class="slider dual-slider" min="0" max="1" step="0.01" value="0.5" />
             </div>
             <div class="dual-values">
-              <input type="number" id="cfgBellBlendStartInput" min="0" max="1" step="0.01" value="0.5" aria-label="Bell blend start" />
-              <input type="number" id="cfgBellBlendEndInput" min="0" max="1" step="0.01" value="1" aria-label="Bell blend end" />
+              <input type="number" id="cfgBrownNoiseStartInput" min="0" max="1" step="0.01" value="0" aria-label="Brown noise start" />
+              <input type="number" id="cfgBrownNoiseEndInput" min="0" max="1" step="0.01" value="0.5" aria-label="Brown noise end" />
+            </div>
+          </div>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Pink Noise Lightness Range (0–1)</label>
+            <div class="dual-track-wrap">
+              <input type="range" id="cfgPinkNoiseStartRange" class="slider dual-slider" min="0" max="1" step="0.01" value="0.5" />
+              <input type="range" id="cfgPinkNoiseEndRange" class="slider dual-slider" min="0" max="1" step="0.01" value="1" />
+            </div>
+            <div class="dual-values">
+              <input type="number" id="cfgPinkNoiseStartInput" min="0" max="1" step="0.01" value="0.5" aria-label="Pink noise start" />
+              <input type="number" id="cfgPinkNoiseEndInput" min="0" max="1" step="0.01" value="1" aria-label="Pink noise end" />
             </div>
           </div>
         </details>
@@ -267,12 +267,45 @@
           <summary>Sound Character</summary>
 
           <div class="setting-row">
-            <label class="settings-label" for="cfgNoiseType">Noise Type</label>
-            <select id="cfgNoiseType" class="settings-select">
+            <label class="settings-label" for="cfgUpperNoiseType">Upper Noise Type</label>
+            <select id="cfgUpperNoiseType" class="settings-select">
               <option value="pink" selected>Pink</option>
               <option value="white">White</option>
               <option value="brown">Brown</option>
             </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="settings-label" for="cfgLowerNoiseType">Lower Noise Type</label>
+            <select id="cfgLowerNoiseType" class="settings-select">
+              <option value="brown" selected>Brown</option>
+              <option value="pink">Pink</option>
+              <option value="white">White</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="settings-label" for="cfgBellNoiseType">Bell Noise Type</label>
+            <select id="cfgBellNoiseType" class="settings-select">
+              <option value="pink" selected>Pink</option>
+              <option value="white">White</option>
+              <option value="brown">Brown</option>
+            </select>
+          </div>
+
+          <div class="dual-control">
+            <label class="settings-label">Noise Gain (Upper / Lower)</label>
+            <div class="dual-values">
+              <input type="number" id="cfgNoiseUpperMaxGainInput" min="0" max="1" step="0.01" value="0.5" aria-label="Maximum upper noise gain" />
+              <input type="number" id="cfgNoiseLowerMaxGainInput" min="0" max="1" step="0.01" value="0.35" aria-label="Maximum lower noise gain" />
+            </div>
+          </div>
+
+          <div class="dual-control">
+            <label class="settings-label">Bell Noise Boost</label>
+            <div class="dual-values">
+              <input type="number" id="cfgNoiseBellBoostInput" min="0" max="20" step="0.1" value="1.2" aria-label="Bell resonance noise boost" />
+            </div>
           </div>
 
           <div class="setting-row">
@@ -301,6 +334,11 @@
             </div>
           </div>
         </details>
+
+        <div class="settings-actions">
+          <button class="btn settings-copy-btn" id="copySettingsBtn" type="button">Copy Settings</button>
+          <p class="settings-copy-status" id="settingsCopyStatus" aria-live="polite">Copies the current settings as the content for default-settings.js, including upper pink noise and lower brown noise settings.</p>
+        </div>
       </section>
 
       <!-- Screen-reader live announcement region -->
@@ -308,6 +346,7 @@
 
     </main>
 
+    <script src="default-settings.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

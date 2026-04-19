@@ -511,6 +511,24 @@ body {
   cursor: pointer;
 }
 
+.settings-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding-top: 0.25rem;
+}
+
+.settings-copy-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.settings-copy-status {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
 /* Slider visual feedback when camera is active (read-only) */
 .slider:disabled {
   opacity: 0.45;

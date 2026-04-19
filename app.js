@@ -5,13 +5,13 @@
  * Architecture
  * ─────────────────────────────────────────────────────────────
  *  OscillatorNode (sine)  ──► gainOsc ──┐
- *  AudioBufferSourceNode (noise) ──► gainNoise ──┤
+ *  AudioBufferSourceNode (pink/brown noise) ──► gainNoiseUpper/gainNoiseLower ──┤
  *                                              masterGain ──► DynamicsCompressorNode ──► destination
  *
  * Mapping rules
  *  Hue  (0–360)  → Frequency  110–880 Hz  (logarithmic / octave-loop)
- *  Sat  (0–1)    → Noise gain  1.0–0    (inverted full range: grey=100% noise, vivid=silent)
- *  Lig  (0–1)    → Master vol  0–0.80 (0..50%), then Bell blend 0–100% (50..100%)
+ *  Sat  (0–1)    → Bell blend  100%–0%  (grey=max bell, vivid=min bell)
+ *  Lig  (0–1)    → Brown noise 100%–0% (0..50%), oscillator volume 0–100% (0..50%), then pink noise 0–100% (50..100%)
  *
  * The core mapping functions are pure (no DOM / Web Audio references)
  * so they can be reused in React Native or other environments.
@@ -70,7 +70,7 @@ function rgbToHsl(r, g, b) {
  * @param {number} hue - 0..360
  * @returns {{ freqA: number, gainA: number, freqB: number, gainB: number }}
  */
-const CONFIG = {
+const FALLBACK_CONFIG = {
   hue: {
     freqMin: 110,
     freqMax: 880,
@@ -80,21 +80,26 @@ const CONFIG = {
     blendFreqHigh: 880,
   },
   saturation: {
-    noiseStart: 0.1,
-    noiseEnd: 0.7,
-    noiseGainMin: 0,
-    noiseGainMax: 1,
+    bellBlendStart: 0,
+    bellBlendEnd: 0.7,
   },
   lightness: {
     volumeStart: 0,
     volumeEnd: 0.50,
     volumeMin: 0,
     volumeMax: 1,
-    bellBlendStart: 0.50,
-    bellBlendEnd: 1,
+    brownNoiseStart: 0,
+    brownNoiseEnd: 0.50,
+    pinkNoiseStart: 0.50,
+    pinkNoiseEnd: 1,
   },
   noise: {
-    type: 'pink', // pink | white | brown
+    upperType: 'pink', // pink | white | brown
+    lowerType: 'brown', // pink | white | brown
+    bellType: 'pink', // pink | white | brown
+    upperMaxGain: 0.5,
+    lowerMaxGain: 0.35,
+    bellResonanceBoost: 1.2,
   },
   theremin: {
     waveform: 'sine',
@@ -102,10 +107,66 @@ const CONFIG = {
     lfoDepthRatio: 0.012,
   },
   bell: {
-    inharmonicRatio: 4,
-    brightness: 10,
+    inharmonicRatio: 4.2,
+    brightness: 1,
   },
 };
+
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function mergeConfigObjects(target, patch) {
+  Object.keys(patch).forEach((key) => {
+    const value = patch[key];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      target[key] = value;
+      return;
+    }
+    if (!target[key] || typeof target[key] !== 'object' || Array.isArray(target[key])) {
+      target[key] = {};
+    }
+    mergeConfigObjects(target[key], value);
+  });
+}
+
+function stripJsonComments(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
+function parseSettingsJSONC(text) {
+  return JSON.parse(stripJsonComments(text));
+}
+
+function loadDefaultConfig() {
+  const config = deepClone(FALLBACK_CONFIG);
+  if (typeof window !== 'undefined' && typeof window.TONOCHROME_DEFAULT_SETTINGS_JSON === 'string') {
+    try {
+      mergeConfigObjects(config, parseSettingsJSONC(window.TONOCHROME_DEFAULT_SETTINGS_JSON));
+    } catch (err) {
+      console.warn('[Config] Failed to parse default-settings.js, using fallback config.', err);
+    }
+  }
+
+  // Backward compatibility for older exported defaults.
+  if (typeof config.noise.type === 'string' && !config.noise.upperType) {
+    config.noise.upperType = config.noise.type;
+  }
+  if (typeof config.noise.maxGain === 'number' && typeof config.noise.upperMaxGain !== 'number') {
+    config.noise.upperMaxGain = config.noise.maxGain;
+  }
+  if (typeof config.lightness.noiseStart === 'number' && typeof config.lightness.pinkNoiseStart !== 'number') {
+    config.lightness.pinkNoiseStart = config.lightness.noiseStart;
+  }
+  if (typeof config.lightness.noiseEnd === 'number' && typeof config.lightness.pinkNoiseEnd !== 'number') {
+    config.lightness.pinkNoiseEnd = config.lightness.noiseEnd;
+  }
+  return config;
+}
+
+const CONFIG = loadDefaultConfig();
 
 function clamp01(v) {
   return Math.min(Math.max(v, 0), 1);
@@ -117,14 +178,30 @@ function invLerp(value, a, b) {
   return clamp01((value - a) / d);
 }
 
+const LEGACY_BELL_HARMONICS = [
+  { ratio: 1, gain: 1.00 },
+  { ratio: 2, gain: 0.50 },
+  { ratio: 3, gain: 0.20 },
+  { ratio: 4.2, gain: 0.08 },
+];
+
 function getBellHarmonics() {
-  const bright = CONFIG.bell.brightness;
-  return [
-    { ratio: 1, gain: 1.00 * bright },
-    { ratio: 2, gain: 0.50 * bright },
-    { ratio: 3, gain: 0.20 * bright },
-    { ratio: CONFIG.bell.inharmonicRatio, gain: 0.08 * bright },
+  const brightness = Math.max(CONFIG.bell.brightness, 0.1);
+  const harmonics = [
+    { ratio: 1, gain: LEGACY_BELL_HARMONICS[0].gain },
+    { ratio: 2, gain: LEGACY_BELL_HARMONICS[1].gain * brightness },
+    { ratio: 3, gain: LEGACY_BELL_HARMONICS[2].gain * Math.pow(brightness, 1.35) },
+    { ratio: CONFIG.bell.inharmonicRatio, gain: LEGACY_BELL_HARMONICS[3].gain * Math.pow(brightness, 1.7) },
   ];
+
+  const legacyEnergy = LEGACY_BELL_HARMONICS.reduce((sum, harmonic) => sum + harmonic.gain * harmonic.gain, 0);
+  const currentEnergy = harmonics.reduce((sum, harmonic) => sum + harmonic.gain * harmonic.gain, 0);
+  const normalization = currentEnergy > 0 ? Math.sqrt(legacyEnergy / currentEnergy) : 1;
+
+  return harmonics.map((harmonic) => ({
+    ratio: harmonic.ratio,
+    gain: harmonic.gain * normalization,
+  }));
 }
 
 function hueToFrequencyBlend(hue) {
@@ -158,44 +235,6 @@ function hueToFrequency(hue) {
 }
 
 /**
- * Saturation → Noise gain
- * Noise is active from sat = 0 up to NOISE_CEIL (0.70); above that it is
- * silent.  The peak noise level is capped at 0.5 (50% blend) so the tone
- * is always at least half the mix.
- *
- *   sat = 0         → noise = 0.5  (50% blend)
- *   sat = NOISE_CEIL → noise = 0
- *   sat > NOISE_CEIL → noise = 0
- *
- * @param {number} saturation - 0..1
- * @returns {number} noise gain 0..0.5
- */
-function saturationToNoiseGain(saturation) {
-  const { noiseStart, noiseEnd, noiseGainMin, noiseGainMax } = CONFIG.saturation;
-  if (saturation <= noiseStart) return noiseGainMax;
-  if (saturation >= noiseEnd) return noiseGainMin;
-  const t = invLerp(saturation, noiseStart, noiseEnd);
-  return noiseGainMax + (noiseGainMin - noiseGainMax) * t;
-}
-
-/**
- * Saturation → Oscillator gain
- * Ramps from 0 at sat = 0 to full (1.0) at sat = NOISE_CEIL, then stays
- * at 1.0 above that (pure tone once noise is gone).
- *
- *   sat = 0         → osc gain = 0
- *   sat = NOISE_CEIL → osc gain = 1.0
- *   sat > NOISE_CEIL → osc gain = 1.0
- *
- * @param {number} saturation - 0..1
- * @returns {number} oscillator gain 0..1.0
- */
-function saturationToOscGain(saturation) {
-  const { noiseStart, noiseEnd } = CONFIG.saturation;
-  return invLerp(saturation, noiseStart, noiseEnd);
-}
-
-/**
  * Lightness → Master volume
  * Volume is controlled in the first half only:
  *   L = 0..0.5 => vol = 0..MAX_VOL
@@ -215,16 +254,57 @@ function lightnessToVolume(lightness) {
 }
 
 /**
- * Lightness → Bell blend amount
- *   L = 0..0.5 → 0
- *   L = 0.5..1 → 0..1
+ * Saturation → Bell blend amount
+ * S = 0 → bell blend = 1.0 (maximum bell/resonance)
+ * S = 0.7 → bell blend = 0 (no bell)
  *
- * @param {number} lightness - 0..1
+ * @param {number} saturation - 0..1
  * @returns {number} bell blend 0..1
  */
-function lightnessToBellBlend(lightness) {
-  const { bellBlendStart, bellBlendEnd } = CONFIG.lightness;
-  return invLerp(lightness, bellBlendStart, bellBlendEnd);
+function saturationToBellBlend(saturation) {
+  const { bellBlendStart, bellBlendEnd } = CONFIG.saturation;
+  return invLerp(saturation, bellBlendEnd, bellBlendStart);
+}
+
+/**
+ * Lightness → Pink noise blend amount
+ * L = pinkNoiseStart..pinkNoiseEnd → 0..1
+ *
+ * @param {number} lightness - 0..1
+ * @returns {number} pink noise blend 0..1
+ */
+function lightnessToPinkNoiseBlend(lightness) {
+  const { pinkNoiseStart, pinkNoiseEnd } = CONFIG.lightness;
+  if (lightness < pinkNoiseStart) return 0;
+  return invLerp(lightness, pinkNoiseStart, pinkNoiseEnd);
+}
+
+/**
+ * Lightness → Brown noise blend amount
+ * L = brownNoiseEnd..brownNoiseStart → 0..1 when moving downward.
+ *
+ * @param {number} lightness - 0..1
+ * @returns {number} brown noise blend 0..1
+ */
+function lightnessToBrownNoiseBlend(lightness) {
+  const { brownNoiseStart, brownNoiseEnd } = CONFIG.lightness;
+  if (lightness > brownNoiseEnd) return 0;
+  return invLerp(lightness, brownNoiseEnd, brownNoiseStart);
+}
+
+/**
+ * Lightness → Oscillator scale (inverse to noise blend)
+ * L = 0..0.5 → osc scale = 1 (full oscillator volume)
+ * L = 0.5..1.0 → osc scale = 1..0 (inverse crossfade with noise)
+ * At L=1.0, oscillators are silent and only noise is heard.
+ *
+ * @param {number} lightness - 0..1
+ * @returns {number} oscillator scale 0..1
+ */
+function lightnessToOscillatorScale(lightness) {
+  const { pinkNoiseStart, pinkNoiseEnd } = CONFIG.lightness;
+  if (lightness < pinkNoiseStart) return 1;
+  return 1 - invLerp(lightness, pinkNoiseStart, pinkNoiseEnd);
 }
 
 /**
@@ -252,13 +332,18 @@ const AudioEngine = (() => {
   let ctx = null;
   let oscillator = null;
   let oscillator2 = null;  // second oscillator for hue blend zone (purple → red)
-  let noiseSource = null;
+  let noiseSourceUpper = null;
+  let noiseSourceLower = null;
+  let noiseSourceBell = null;
   let gainOsc = null;
   let gainOsc2 = null;     // gain for oscillator2 blend
-  let gainNoise = null;
+  let gainOscVolume = null; // volume control for oscillators and bell harmonics only
+  let gainNoiseUpper = null;
+  let gainNoiseLower = null;
+  let gainNoiseBell = null;
   let masterGain = null;
   let compressor = null;
-  let noiseBuffer = null;
+  let noiseBuffers = {};
   let running = false;
   let muted = false;
   let soundMode = 'theremin'; // 'synth' | 'bell' | 'theremin'
@@ -293,19 +378,19 @@ const AudioEngine = (() => {
    * Build a 2-second noise buffer (offline, once).
    * Supports pink, white, and brown noise via CONFIG.noise.type.
    */
-  function createNoiseBuffer() {
-    if (noiseBuffer) return;
+  function getNoiseBuffer(noiseType) {
+    if (noiseBuffers[noiseType]) return noiseBuffers[noiseType];
     const sampleRate = ctx.sampleRate;
     const length = sampleRate * 2; // 2 s loop
-    noiseBuffer = ctx.createBuffer(1, length, sampleRate);
-    const data = noiseBuffer.getChannelData(0);
-    const noiseType = CONFIG.noise.type;
+    const buffer = ctx.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
 
     if (noiseType === 'white') {
       for (let i = 0; i < length; i++) {
         data[i] = Math.random() * 2 - 1;
       }
-      return;
+      noiseBuffers[noiseType] = buffer;
+      return buffer;
     }
 
     if (noiseType === 'brown') {
@@ -315,7 +400,8 @@ const AudioEngine = (() => {
         last = (last + 0.02 * white) / 1.02;
         data[i] = last * 3.5;
       }
-      return;
+      noiseBuffers[noiseType] = buffer;
+      return buffer;
     }
 
     // Pink noise (Paul Kellett approximation)
@@ -332,24 +418,34 @@ const AudioEngine = (() => {
       b6 = white * 0.115926;
       data[i] = pink * 0.11;
     }
+
+    noiseBuffers[noiseType] = buffer;
+    return buffer;
+  }
+
+  function createLoopingNoiseSource(noiseType) {
+    const source = ctx.createBufferSource();
+    source.buffer = getNoiseBuffer(noiseType);
+    source.loop = true;
+    return source;
   }
 
   /**
-   * Linear scale for the base voice as Bell blend increases.
-   * @param {number} lightness - 0..1
+   * Linear scale for the base voice (inverted bell blend).
+   * @param {number} saturation - 0..1
    * @returns {number} scale 0..1
    */
-  function bellBlendBaseScale(lightness) {
-    return 1 - lightnessToBellBlend(lightness);
+  function bellBlendBaseScale(saturation) {
+    return 1 - saturationToBellBlend(saturation);
   }
 
   /**
-   * Linear scale for the Bell harmonic layer from Lightness.
-   * @param {number} lightness - 0..1
+   * Linear scale for the Bell harmonic layer from Saturation.
+   * @param {number} saturation - 0..1
    * @returns {number} scale 0..1
    */
-  function bellBlendLayerScale(lightness) {
-    return lightnessToBellBlend(lightness);
+  function bellBlendLayerScale(saturation) {
+    return saturationToBellBlend(saturation);
   }
 
   /**
@@ -361,29 +457,33 @@ const AudioEngine = (() => {
   /**
    * Build additive bandpass-filter layers on the noise signal — one filter per
    * bell harmonic, tuned to freq * ratio with Q=8.  Adds a pitched resonance to
-   * the noise that mirrors the oscillator bell effect.  Gain = bellScale * relGain * 5
-   * (the *5 compensates for the energy attenuation of a Q=8 bandpass on pink noise).
+   * the noise that mirrors the oscillator bell effect.
+   * Gain = bellScale * relGain * CONFIG.noise.bellResonanceBoost.
    */
-  function _buildNoiseHarmonicsInto(freq, bellScale) {
+  function _buildNoiseHarmonicsInto(freq, bellScale, outputGain) {
     const harmonics = getBellHarmonics();
-    const bright = CONFIG.bell.brightness || 1;
+    const noiseInput = gainNoiseBell;
+    const out = outputGain || masterGain;
+    const resonanceBoost = CONFIG.noise.bellResonanceBoost;
+    const referenceGain = harmonics[0] ? harmonics[0].gain || 1 : 1;
     harmonics.forEach(h => {
       const f = ctx.createBiquadFilter();
       f.type = 'bandpass';
       f.frequency.value = freq * h.ratio;
       f.Q.value = 8;
       const g = ctx.createGain();
-      g.gain.value = bellScale * (h.gain / bright) * 5;
-      gainNoise.connect(f);
+      g.gain.value = bellScale * (h.gain / referenceGain) * resonanceBoost;
+      noiseInput.connect(f);
       f.connect(g);
-      g.connect(masterGain);
+      g.connect(out);
       noiseBellFilters.push(f);
-      gainNoiseWets.push({ node: g, relGain: h.gain / bright });
+      gainNoiseWets.push({ node: g, relGain: h.gain / referenceGain });
     });
   }
 
-  function _buildBellHarmonicsInto(freq, gainScale, oscArr, gainArr) {
+  function _buildBellHarmonicsInto(freq, gainScale, oscArr, gainArr, outputGain) {
     const harmonics = getBellHarmonics();
+    const out = outputGain || masterGain; // default to masterGain if not provided
     harmonics.forEach((h) => {
       const osc = ctx.createOscillator();
       osc.type = 'sine';
@@ -391,7 +491,7 @@ const AudioEngine = (() => {
       const g = ctx.createGain();
       g.gain.value = h.gain * gainScale;
       osc.connect(g);
-      g.connect(masterGain);
+      g.connect(out);
       osc.start();
       oscArr.push(osc);
       gainArr.push({ node: g, baseGain: h.gain });
@@ -399,13 +499,13 @@ const AudioEngine = (() => {
   }
 
   // Bell harmonics for the primary (freqA) voice
-  function createBellHarmonics(freq, gainScale) {
-    _buildBellHarmonicsInto(freq, gainScale, harmonicOscs, harmonicGains);
+  function createBellHarmonics(freq, gainScale, outputGain) {
+    _buildBellHarmonicsInto(freq, gainScale, harmonicOscs, harmonicGains, outputGain);
   }
 
   // Bell harmonics for the blend (freqB) voice in the hue 270°–360° zone
-  function createBellHarmonicsB(freq, gainScale) {
-    _buildBellHarmonicsInto(freq, gainScale, harmonicOscsB, harmonicGainsB);
+  function createBellHarmonicsB(freq, gainScale, outputGain) {
+    _buildBellHarmonicsInto(freq, gainScale, harmonicOscsB, harmonicGainsB, outputGain);
   }
 
   /**
@@ -413,11 +513,13 @@ const AudioEngine = (() => {
    * Called once per play session.
    */
   function buildSynthGraph(hsl) {
-    createNoiseBuffer();
     const { freqA, gainA, freqB, gainB } = hueToFrequencyBlend(hsl.hue);
-    const oscScale = saturationToOscGain(hsl.saturation);
-    const baseScale = bellBlendBaseScale(hsl.lightness);
-    const bellScale = bellBlendLayerScale(hsl.lightness);
+    const baseScale = bellBlendBaseScale(hsl.saturation);
+    const bellScale = bellBlendLayerScale(hsl.saturation);
+    const pinkNoiseBlend = lightnessToPinkNoiseBlend(hsl.lightness);
+    const brownNoiseBlend = lightnessToBrownNoiseBlend(hsl.lightness);
+    const oscScale = lightnessToOscillatorScale(hsl.lightness);
+    const volScale = lightnessToVolume(hsl.lightness);
 
     // Primary oscillator
     oscillator = ctx.createOscillator();
@@ -435,17 +537,25 @@ const AudioEngine = (() => {
     gainOsc2 = ctx.createGain();
     gainOsc2.gain.value = oscScale * baseScale * gainB;
 
-    // Noise source (looping buffer)
-    noiseSource = ctx.createBufferSource();
-    noiseSource.buffer = noiseBuffer;
-    noiseSource.loop = true;
+    // Volume control for oscillators and bell harmonics only (not for noise)
+    gainOscVolume = ctx.createGain();
+    gainOscVolume.gain.value = muted ? 0 : volScale;
 
-    gainNoise = ctx.createGain();
-    gainNoise.gain.value = saturationToNoiseGain(hsl.saturation);
+    // Noise source (looping buffer) — bypasses volume control
+    noiseSourceUpper = createLoopingNoiseSource(CONFIG.noise.upperType);
+    noiseSourceLower = createLoopingNoiseSource(CONFIG.noise.lowerType);
+    noiseSourceBell = createLoopingNoiseSource(CONFIG.noise.bellType);
 
-    // Bell-filter resonance layer — per-harmonic bandpass filters (mirroring oscillator bell)
+    gainNoiseUpper = ctx.createGain();
+    gainNoiseUpper.gain.value = pinkNoiseBlend * CONFIG.noise.upperMaxGain;
+    gainNoiseLower = ctx.createGain();
+    gainNoiseLower.gain.value = brownNoiseBlend * CONFIG.noise.lowerMaxGain;
+    gainNoiseBell = ctx.createGain();
+    gainNoiseBell.gain.value = 1;
+
+    // Master gain (mute control only, volume is in gainOscVolume)
     masterGain = ctx.createGain();
-    masterGain.gain.value = muted ? 0 : lightnessToVolume(hsl.lightness);
+    masterGain.gain.value = muted ? 0 : 1;
 
     // Limiter/compressor — prevents clipping
     compressor = ctx.createDynamicsCompressor();
@@ -458,48 +568,64 @@ const AudioEngine = (() => {
     // Connect graph
     oscillator.connect(gainOsc);
     oscillator2.connect(gainOsc2);
-    noiseSource.connect(gainNoise);
-    gainNoise.connect(masterGain);
-    gainOsc.connect(masterGain);
-    gainOsc2.connect(masterGain);
+    gainOsc.connect(gainOscVolume);
+    gainOsc2.connect(gainOscVolume);
+    gainOscVolume.connect(masterGain);
+    noiseSourceUpper.connect(gainNoiseUpper);
+    noiseSourceLower.connect(gainNoiseLower);
+    noiseSourceBell.connect(gainNoiseBell);
+    gainNoiseUpper.connect(masterGain);
+    gainNoiseLower.connect(masterGain);
     masterGain.connect(compressor);
     compressor.connect(ctx.destination);
 
     // Start sources
     oscillator.start();
     oscillator2.start();
-    noiseSource.start();
+    noiseSourceUpper.start();
+    noiseSourceLower.start();
+    noiseSourceBell.start();
 
     // Bell harmonics for primary voice (freqA) and blend voice (freqB)
-    createBellHarmonics(freqA, oscScale * bellScale * gainA);
-    createBellHarmonicsB(freqB, oscScale * bellScale * gainB);
-    _buildNoiseHarmonicsInto(freqA, bellScale);
+    // Pass gainOscVolume as the output destination
+    createBellHarmonics(freqA, oscScale * bellScale * gainA, gainOscVolume);
+    createBellHarmonicsB(freqB, oscScale * bellScale * gainB, gainOscVolume);
+    _buildNoiseHarmonicsInto(freqA, oscScale * bellScale, gainOscVolume);
   }
 
   /**
    * Build the bell/piano audio graph using additive harmonic synthesis
-   * layered with the same pink-noise path as Synth mode.
+  * layered with the same upper/lower noise paths as Synth mode.
    * Saturation low  → noisy (grey, distressed bell)
    * Saturation high → clean harmonics (vivid, pure bell/piano tone)
    */
   function buildBellGraph(hsl) {
-    createNoiseBuffer();
-
     const freq = hueToFrequency(hsl.hue);
+    const bellScale = bellBlendLayerScale(hsl.saturation);
+    const pinkNoiseBlend = lightnessToPinkNoiseBlend(hsl.lightness);
+    const brownNoiseBlend = lightnessToBrownNoiseBlend(hsl.lightness);
+    const oscScale = lightnessToOscillatorScale(hsl.lightness);
+    const volScale = lightnessToVolume(hsl.lightness);
 
-    // Noise source (same as Synth)
-    noiseSource = ctx.createBufferSource();
-    noiseSource.buffer = noiseBuffer;
-    noiseSource.loop = true;
+    // Noise source (same as Synth) — bypasses volume control
+    noiseSourceUpper = createLoopingNoiseSource(CONFIG.noise.upperType);
+    noiseSourceLower = createLoopingNoiseSource(CONFIG.noise.lowerType);
+    noiseSourceBell = createLoopingNoiseSource(CONFIG.noise.bellType);
 
-    gainNoise = ctx.createGain();
-    gainNoise.gain.value = saturationToNoiseGain(hsl.saturation);
+    gainNoiseUpper = ctx.createGain();
+    gainNoiseUpper.gain.value = pinkNoiseBlend * CONFIG.noise.upperMaxGain;
+    gainNoiseLower = ctx.createGain();
+    gainNoiseLower.gain.value = brownNoiseBlend * CONFIG.noise.lowerMaxGain;
+    gainNoiseBell = ctx.createGain();
+    gainNoiseBell.gain.value = 1;
 
-    const bellScaleBell = bellBlendLayerScale(hsl.lightness);
+    // Volume control for bell harmonics only (not for noise)
+    gainOscVolume = ctx.createGain();
+    gainOscVolume.gain.value = muted ? 0 : volScale;
 
-    // Bell-filter resonance layer — per-harmonic bandpass filters on noise
+    // Master gain (mute control only, volume is in gainOscVolume)
     masterGain = ctx.createGain();
-    masterGain.gain.value = muted ? 0 : lightnessToVolume(hsl.lightness);
+    masterGain.gain.value = muted ? 0 : 1;
 
     compressor = ctx.createDynamicsCompressor();
     compressor.threshold.value = -6;
@@ -508,36 +634,43 @@ const AudioEngine = (() => {
     compressor.attack.value = 0.003;
     compressor.release.value = 0.15;
 
-    noiseSource.connect(gainNoise);
-    gainNoise.connect(masterGain);
+    gainOscVolume.connect(masterGain);
+    noiseSourceUpper.connect(gainNoiseUpper);
+    noiseSourceLower.connect(gainNoiseLower);
+    noiseSourceBell.connect(gainNoiseBell);
+    gainNoiseUpper.connect(masterGain);
+    gainNoiseLower.connect(masterGain);
     masterGain.connect(compressor);
     compressor.connect(ctx.destination);
 
-    // Additive harmonic oscillators — gain scaled by saturation
-    createBellHarmonics(freq, saturationToOscGain(hsl.saturation));
-    _buildNoiseHarmonicsInto(freq, bellScaleBell);
+    // Additive harmonic oscillators — gain scaled by bell blend, output through gainOscVolume
+    createBellHarmonics(freq, oscScale * bellScale, gainOscVolume);
+    _buildNoiseHarmonicsInto(freq, oscScale * bellScale, gainOscVolume);
 
-    noiseSource.start();
+    noiseSourceUpper.start();
+    noiseSourceLower.start();
+    noiseSourceBell.start();
   }
 
   /**
    * Build the Theremin audio graph.
    * A pure sine oscillator with LFO vibrato layered with the same
-   * pink-noise path as Synth/Bell so saturation noise works identically.
+  * upper/lower noise paths as Synth/Bell so lightness noise works identically.
    *
    * Graph:
    *   lfoOsc (sine ~5 Hz) ──► lfoGain (depth ≈ 1.2% of freq) ──► oscillator.frequency
    *   oscillator (sine) ──► gainOsc ──┐
-   *   noiseSource ──► gainNoise ───────┤
+  *   noiseSourceUpper/lower ──► gainNoiseUpper/lower ──┤
    *                                masterGain ──► compressor ──► destination
    */
   function buildThereminGraph(hsl) {
-    createNoiseBuffer();
-
     const { freqA, gainA, freqB, gainB } = hueToFrequencyBlend(hsl.hue);
-    const oscScale = saturationToOscGain(hsl.saturation);
-    const baseScale = bellBlendBaseScale(hsl.lightness);
-    const bellScale = bellBlendLayerScale(hsl.lightness);
+    const baseScale = bellBlendBaseScale(hsl.saturation);
+    const bellScale = bellBlendLayerScale(hsl.saturation);
+    const pinkNoiseBlend = lightnessToPinkNoiseBlend(hsl.lightness);
+    const brownNoiseBlend = lightnessToBrownNoiseBlend(hsl.lightness);
+    const oscScale = lightnessToOscillatorScale(hsl.lightness);
+    const volScale = lightnessToVolume(hsl.lightness);
 
     // Main oscillator (with LFO vibrato)
     oscillator = ctx.createOscillator();
@@ -566,16 +699,25 @@ const AudioEngine = (() => {
     gainOsc2 = ctx.createGain();
     gainOsc2.gain.value = oscScale * baseScale * gainB;
 
-    // Noise source (same as Synth/Bell)
-    noiseSource = ctx.createBufferSource();
-    noiseSource.buffer = noiseBuffer;
-    noiseSource.loop = true;
+    // Volume control for oscillators and bell harmonics only (not for noise)
+    gainOscVolume = ctx.createGain();
+    gainOscVolume.gain.value = muted ? 0 : volScale;
 
-    gainNoise = ctx.createGain();
-    gainNoise.gain.value = saturationToNoiseGain(hsl.saturation);
+    // Noise source (same as Synth/Bell) — bypasses volume control
+    noiseSourceUpper = createLoopingNoiseSource(CONFIG.noise.upperType);
+    noiseSourceLower = createLoopingNoiseSource(CONFIG.noise.lowerType);
+    noiseSourceBell = createLoopingNoiseSource(CONFIG.noise.bellType);
 
+    gainNoiseUpper = ctx.createGain();
+    gainNoiseUpper.gain.value = pinkNoiseBlend * CONFIG.noise.upperMaxGain;
+    gainNoiseLower = ctx.createGain();
+    gainNoiseLower.gain.value = brownNoiseBlend * CONFIG.noise.lowerMaxGain;
+    gainNoiseBell = ctx.createGain();
+    gainNoiseBell.gain.value = 1;
+
+    // Master gain (mute control only, volume is in gainOscVolume)
     masterGain = ctx.createGain();
-    masterGain.gain.value = muted ? 0 : lightnessToVolume(hsl.lightness);
+    masterGain.gain.value = muted ? 0 : 1;
 
     compressor = ctx.createDynamicsCompressor();
     compressor.threshold.value = -6;
@@ -586,22 +728,29 @@ const AudioEngine = (() => {
 
     oscillator.connect(gainOsc);
     oscillator2.connect(gainOsc2);
-    noiseSource.connect(gainNoise);
-    gainNoise.connect(masterGain);
-    gainOsc.connect(masterGain);
-    gainOsc2.connect(masterGain);
+    gainOsc.connect(gainOscVolume);
+    gainOsc2.connect(gainOscVolume);
+    gainOscVolume.connect(masterGain);
+    noiseSourceUpper.connect(gainNoiseUpper);
+    noiseSourceLower.connect(gainNoiseLower);
+    noiseSourceBell.connect(gainNoiseBell);
+    gainNoiseUpper.connect(masterGain);
+    gainNoiseLower.connect(masterGain);
     masterGain.connect(compressor);
     compressor.connect(ctx.destination);
 
     oscillator.start();
     oscillator2.start();
     lfoOsc.start();
-    noiseSource.start();
+    noiseSourceUpper.start();
+    noiseSourceLower.start();
+    noiseSourceBell.start();
 
     // Bell harmonics for primary voice (freqA) and blend voice (freqB)
-    createBellHarmonics(freqA, oscScale * bellScale * gainA);
-    createBellHarmonicsB(freqB, oscScale * bellScale * gainB);
-    _buildNoiseHarmonicsInto(freqA, bellScale);
+    // Pass gainOscVolume as the output destination
+    createBellHarmonics(freqA, oscScale * bellScale * gainA, gainOscVolume);
+    createBellHarmonicsB(freqB, oscScale * bellScale * gainB, gainOscVolume);
+    _buildNoiseHarmonicsInto(freqA, oscScale * bellScale, gainOscVolume);
   }
 
   /**
@@ -631,14 +780,20 @@ const AudioEngine = (() => {
       oscillator2.disconnect();
       oscillator2 = null;
     }
-    if (noiseSource) {
-      try { noiseSource.stop(); } catch (_) {}
-      noiseSource.disconnect();
-      noiseSource = null;
-    }
+    [noiseSourceUpper, noiseSourceLower, noiseSourceBell].forEach((source, index) => {
+      if (!source) return;
+      try { source.stop(); } catch (_) {}
+      source.disconnect();
+      if (index === 0) noiseSourceUpper = null;
+      if (index === 1) noiseSourceLower = null;
+      if (index === 2) noiseSourceBell = null;
+    });
     if (gainOsc)  { gainOsc.disconnect();  gainOsc = null; }
     if (gainOsc2) { gainOsc2.disconnect(); gainOsc2 = null; }
-    if (gainNoise) { gainNoise.disconnect(); gainNoise = null; }
+    if (gainOscVolume) { gainOscVolume.disconnect(); gainOscVolume = null; }
+    if (gainNoiseUpper) { gainNoiseUpper.disconnect(); gainNoiseUpper = null; }
+    if (gainNoiseLower) { gainNoiseLower.disconnect(); gainNoiseLower = null; }
+    if (gainNoiseBell) { gainNoiseBell.disconnect(); gainNoiseBell = null; }
     noiseBellFilters.forEach(f => f.disconnect());
     noiseBellFilters = [];
     gainNoiseWets.forEach(g => g.node.disconnect());
@@ -709,31 +864,34 @@ const AudioEngine = (() => {
     lastHSL = { ...hsl };
     const now = ctx.currentTime;
     const harmonics = getBellHarmonics();
+    const bellScale = bellBlendLayerScale(hsl.saturation);
+    const baseScale = bellBlendBaseScale(hsl.saturation);
+    const pinkNoiseBlend = lightnessToPinkNoiseBlend(hsl.lightness);
+    const brownNoiseBlend = lightnessToBrownNoiseBlend(hsl.lightness);
+    const oscScale = lightnessToOscillatorScale(hsl.lightness);
 
     if (soundMode === 'bell') {
       const freq = hueToFrequency(hsl.hue);
-      const oscScale = saturationToOscGain(hsl.saturation);
-      const bellScaleB = bellBlendLayerScale(hsl.lightness);
       harmonicOscs.forEach((osc, i) => {
         osc.frequency.setTargetAtTime(freq * harmonics[i].ratio, now, RAMP_TIME);
       });
       harmonicGains.forEach(h => {
-        h.node.gain.setTargetAtTime(h.baseGain * oscScale, now, RAMP_TIME);
+        h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale, now, RAMP_TIME);
       });
-      if (gainNoise) {
-        gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
+      if (gainNoiseUpper) {
+        gainNoiseUpper.gain.setTargetAtTime(pinkNoiseBlend * CONFIG.noise.upperMaxGain, now, RAMP_TIME);
+      }
+      if (gainNoiseLower) {
+        gainNoiseLower.gain.setTargetAtTime(brownNoiseBlend * CONFIG.noise.lowerMaxGain, now, RAMP_TIME);
       }
       noiseBellFilters.forEach((f, i) => {
         f.frequency.setTargetAtTime(freq * harmonics[i].ratio, now, RAMP_TIME);
       });
       gainNoiseWets.forEach((g, i) => {
-        g.node.gain.setTargetAtTime(bellScaleB * g.relGain * 5, now, RAMP_TIME);
+        g.node.gain.setTargetAtTime(oscScale * bellScale * g.relGain * CONFIG.noise.bellResonanceBoost, now, RAMP_TIME);
       });
     } else if (soundMode === 'theremin') {
       const { freqA, gainA, freqB, gainB } = hueToFrequencyBlend(hsl.hue);
-      const oscScale = saturationToOscGain(hsl.saturation);
-      const baseScale = bellBlendBaseScale(hsl.lightness);
-      const bellScale = bellBlendLayerScale(hsl.lightness);
       if (oscillator) {
         oscillator.frequency.setTargetAtTime(freqA, now, RAMP_TIME);
       }
@@ -750,14 +908,17 @@ const AudioEngine = (() => {
       if (gainOsc2) {
         gainOsc2.gain.setTargetAtTime(oscScale * baseScale * gainB, now, RAMP_TIME);
       }
-      if (gainNoise) {
-        gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
+      if (gainNoiseUpper) {
+        gainNoiseUpper.gain.setTargetAtTime(pinkNoiseBlend * CONFIG.noise.upperMaxGain, now, RAMP_TIME);
+      }
+      if (gainNoiseLower) {
+        gainNoiseLower.gain.setTargetAtTime(brownNoiseBlend * CONFIG.noise.lowerMaxGain, now, RAMP_TIME);
       }
       noiseBellFilters.forEach((f, i) => {
         f.frequency.setTargetAtTime(freqA * harmonics[i].ratio, now, RAMP_TIME);
       });
       gainNoiseWets.forEach((g, i) => {
-        g.node.gain.setTargetAtTime(bellScale * g.relGain * 5, now, RAMP_TIME);
+        g.node.gain.setTargetAtTime(oscScale * bellScale * g.relGain * CONFIG.noise.bellResonanceBoost, now, RAMP_TIME);
       });
       harmonicOscs.forEach((osc, i) => {
         osc.frequency.setTargetAtTime(freqA * harmonics[i].ratio, now, RAMP_TIME);
@@ -774,9 +935,6 @@ const AudioEngine = (() => {
     } else {
       // synth mode
       const { freqA, gainA, freqB, gainB } = hueToFrequencyBlend(hsl.hue);
-      const oscScale = saturationToOscGain(hsl.saturation);
-      const baseScale = bellBlendBaseScale(hsl.lightness);
-      const bellScale = bellBlendLayerScale(hsl.lightness);
       if (oscillator) {
         oscillator.frequency.setTargetAtTime(freqA, now, RAMP_TIME);
       }
@@ -789,14 +947,17 @@ const AudioEngine = (() => {
       if (gainOsc2) {
         gainOsc2.gain.setTargetAtTime(oscScale * baseScale * gainB, now, RAMP_TIME);
       }
-      if (gainNoise) {
-        gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
+      if (gainNoiseUpper) {
+        gainNoiseUpper.gain.setTargetAtTime(pinkNoiseBlend * CONFIG.noise.upperMaxGain, now, RAMP_TIME);
+      }
+      if (gainNoiseLower) {
+        gainNoiseLower.gain.setTargetAtTime(brownNoiseBlend * CONFIG.noise.lowerMaxGain, now, RAMP_TIME);
       }
       noiseBellFilters.forEach((f, i) => {
         f.frequency.setTargetAtTime(freqA * harmonics[i].ratio, now, RAMP_TIME);
       });
       gainNoiseWets.forEach((g, i) => {
-        g.node.gain.setTargetAtTime(bellScale * g.relGain * 5, now, RAMP_TIME);
+        g.node.gain.setTargetAtTime(oscScale * bellScale * g.relGain * CONFIG.noise.bellResonanceBoost, now, RAMP_TIME);
       });
       harmonicOscs.forEach((osc, i) => {
         osc.frequency.setTargetAtTime(freqA * harmonics[i].ratio, now, RAMP_TIME);
@@ -812,9 +973,12 @@ const AudioEngine = (() => {
       });
     }
 
-    if (masterGain) {
+    if (gainOscVolume) {
       const targetVol = muted ? 0 : lightnessToVolume(hsl.lightness);
-      masterGain.gain.setTargetAtTime(targetVol, now, RAMP_TIME);
+      gainOscVolume.gain.setTargetAtTime(targetVol, now, RAMP_TIME);
+    }
+    if (masterGain) {
+      masterGain.gain.setTargetAtTime(muted ? 0 : 1, now, RAMP_TIME);
     }
   }
 
@@ -825,10 +989,13 @@ const AudioEngine = (() => {
    */
   function setMute(shouldMute, lightness) {
     muted = shouldMute;
-    if (!masterGain || !ctx) return;
+    if (!gainOscVolume || !ctx) return;
     const now = ctx.currentTime;
     const targetVol = muted ? 0 : lightnessToVolume(lightness);
-    masterGain.gain.setTargetAtTime(targetVol, now, RAMP_TIME);
+    gainOscVolume.gain.setTargetAtTime(targetVol, now, RAMP_TIME);
+    if (masterGain) {
+      masterGain.gain.setTargetAtTime(muted ? 0 : 1, now, RAMP_TIME);
+    }
   }
 
   /**
@@ -866,8 +1033,8 @@ const AudioEngine = (() => {
       }
     });
 
-    // Noise changes require a new buffer build.
-    noiseBuffer = null;
+    // Noise changes require new buffer builds.
+    noiseBuffers = {};
 
     if (running) {
       teardownGraph();
@@ -1101,6 +1268,7 @@ const UI = (() => {
   const noteDisplay = document.getElementById("noteDisplay");
 
   const satHint = document.getElementById("satHint");
+  const ligHint = document.getElementById("ligHint");
 
   const cameraBtn = document.getElementById("cameraBtn");
   const flashBtn = document.getElementById("flashBtn");
@@ -1125,15 +1293,10 @@ const UI = (() => {
   const cfgHueBlendLowFreqInput = document.getElementById("cfgHueBlendLowFreqInput");
   const cfgHueBlendHighFreqInput = document.getElementById("cfgHueBlendHighFreqInput");
 
-  const cfgSatNoiseStartRange = document.getElementById("cfgSatNoiseStartRange");
-  const cfgSatNoiseEndRange = document.getElementById("cfgSatNoiseEndRange");
-  const cfgSatNoiseStartInput = document.getElementById("cfgSatNoiseStartInput");
-  const cfgSatNoiseEndInput = document.getElementById("cfgSatNoiseEndInput");
-
-  const cfgNoiseGainMinRange = document.getElementById("cfgNoiseGainMinRange");
-  const cfgNoiseGainMaxRange = document.getElementById("cfgNoiseGainMaxRange");
-  const cfgNoiseGainMinInput = document.getElementById("cfgNoiseGainMinInput");
-  const cfgNoiseGainMaxInput = document.getElementById("cfgNoiseGainMaxInput");
+  const cfgSatBellStartRange = document.getElementById("cfgSatBellStartRange");
+  const cfgSatBellEndRange = document.getElementById("cfgSatBellEndRange");
+  const cfgSatBellStartInput = document.getElementById("cfgSatBellStartInput");
+  const cfgSatBellEndInput = document.getElementById("cfgSatBellEndInput");
 
   const cfgVolStartRange = document.getElementById("cfgVolStartRange");
   const cfgVolEndRange = document.getElementById("cfgVolEndRange");
@@ -1145,17 +1308,29 @@ const UI = (() => {
   const cfgVolMinInput = document.getElementById("cfgVolMinInput");
   const cfgVolMaxInput = document.getElementById("cfgVolMaxInput");
 
-  const cfgBellBlendStartRange = document.getElementById("cfgBellBlendStartRange");
-  const cfgBellBlendEndRange = document.getElementById("cfgBellBlendEndRange");
-  const cfgBellBlendStartInput = document.getElementById("cfgBellBlendStartInput");
-  const cfgBellBlendEndInput = document.getElementById("cfgBellBlendEndInput");
+  const cfgBrownNoiseStartRange = document.getElementById("cfgBrownNoiseStartRange");
+  const cfgBrownNoiseEndRange = document.getElementById("cfgBrownNoiseEndRange");
+  const cfgBrownNoiseStartInput = document.getElementById("cfgBrownNoiseStartInput");
+  const cfgBrownNoiseEndInput = document.getElementById("cfgBrownNoiseEndInput");
 
-  const cfgNoiseType = document.getElementById("cfgNoiseType");
+  const cfgPinkNoiseStartRange = document.getElementById("cfgPinkNoiseStartRange");
+  const cfgPinkNoiseEndRange = document.getElementById("cfgPinkNoiseEndRange");
+  const cfgPinkNoiseStartInput = document.getElementById("cfgPinkNoiseStartInput");
+  const cfgPinkNoiseEndInput = document.getElementById("cfgPinkNoiseEndInput");
+
+  const cfgUpperNoiseType = document.getElementById("cfgUpperNoiseType");
+  const cfgLowerNoiseType = document.getElementById("cfgLowerNoiseType");
+  const cfgBellNoiseType = document.getElementById("cfgBellNoiseType");
+  const cfgNoiseUpperMaxGainInput = document.getElementById("cfgNoiseUpperMaxGainInput");
+  const cfgNoiseLowerMaxGainInput = document.getElementById("cfgNoiseLowerMaxGainInput");
+  const cfgNoiseBellBoostInput = document.getElementById("cfgNoiseBellBoostInput");
   const cfgThereminWaveform = document.getElementById("cfgThereminWaveform");
   const cfgThereminLfoRateInput = document.getElementById("cfgThereminLfoRateInput");
   const cfgThereminLfoDepthInput = document.getElementById("cfgThereminLfoDepthInput");
   const cfgBellInharmonicInput = document.getElementById("cfgBellInharmonicInput");
   const cfgBellBrightnessInput = document.getElementById("cfgBellBrightnessInput");
+  const copySettingsBtn = document.getElementById("copySettingsBtn");
+  const settingsCopyStatus = document.getElementById("settingsCopyStatus");
 
   // --- Screen-reader announcement helpers ---
   let _announceTimer = null;
@@ -1168,6 +1343,10 @@ const UI = (() => {
 
   let _settingsTimer = null;
   let _pendingSettings = {};
+
+  function setSettingsCopyStatus(message) {
+    if (settingsCopyStatus) settingsCopyStatus.textContent = message;
+  }
 
   function mergeSettingsPatch(target, patch) {
     Object.keys(patch).forEach((k) => {
@@ -1187,6 +1366,102 @@ const UI = (() => {
       updateVisuals(hsl);
       AudioEngine.update(hsl);
     }, 60);
+  }
+
+  function formatSettingsJSONC(config) {
+    const C = config;
+    return [
+      '{',
+      '  // Hue slider -> pitch mapping.',
+      '  "hue": {',
+      `    "freqMin": ${C.hue.freqMin},`,
+      `    "freqMax": ${C.hue.freqMax},`,
+      `    "blendStart": ${C.hue.blendStart},`,
+      `    "blendEnd": ${C.hue.blendEnd},`,
+      `    "blendFreqLow": ${C.hue.blendFreqLow},`,
+      `    "blendFreqHigh": ${C.hue.blendFreqHigh}`,
+      '  },',
+      '',
+      '  // Saturation slider -> bell blend.',
+      '  // bellBlendStart is the saturation with maximum bell tone.',
+      '  // bellBlendEnd is the saturation where the bell layer reaches zero.',
+      '  "saturation": {',
+      `    "bellBlendStart": ${C.saturation.bellBlendStart},`,
+      `    "bellBlendEnd": ${C.saturation.bellBlendEnd}`,
+      '  },',
+      '',
+      '  // Lightness slider -> brown noise below mid, volume up to mid, pink noise above mid.',
+      '  "lightness": {',
+      `    "volumeStart": ${C.lightness.volumeStart},`,
+      `    "volumeEnd": ${C.lightness.volumeEnd},`,
+      `    "volumeMin": ${C.lightness.volumeMin},`,
+      `    "volumeMax": ${C.lightness.volumeMax},`,
+      `    "brownNoiseStart": ${C.lightness.brownNoiseStart},`,
+      `    "brownNoiseEnd": ${C.lightness.brownNoiseEnd},`,
+      `    "pinkNoiseStart": ${C.lightness.pinkNoiseStart},`,
+      `    "pinkNoiseEnd": ${C.lightness.pinkNoiseEnd}`,
+      '  },',
+      '',
+      '  // Global noise settings.',
+      '  "noise": {',
+      `    "upperType": ${JSON.stringify(C.noise.upperType)},`,
+      `    "lowerType": ${JSON.stringify(C.noise.lowerType)},`,
+      `    "bellType": ${JSON.stringify(C.noise.bellType)},`,
+      `    "upperMaxGain": ${C.noise.upperMaxGain},`,
+      `    "lowerMaxGain": ${C.noise.lowerMaxGain},`,
+      `    "bellResonanceBoost": ${C.noise.bellResonanceBoost}`,
+      '  },',
+      '',
+      '  // Theremin mode settings.',
+      '  "theremin": {',
+      `    "waveform": ${JSON.stringify(C.theremin.waveform)},`,
+      `    "lfoRate": ${C.theremin.lfoRate},`,
+      `    "lfoDepthRatio": ${C.theremin.lfoDepthRatio}`,
+      '  },',
+      '',
+      '  // Bell harmonic settings.',
+      '  // inharmonicRatio = 4.2 and brightness = 1 match the legacy bell tone.',
+      '  // brightness changes overtone color while keeping overall level close to the legacy sound.',
+      '  "bell": {',
+      `    "inharmonicRatio": ${C.bell.inharmonicRatio},`,
+      `    "brightness": ${C.bell.brightness}`,
+      '  }',
+      '}',
+    ].join('\n');
+  }
+
+  function formatDefaultSettingsScript(config) {
+    return [
+      '// Tonochrome default settings.',
+      '// Replace this file with the text copied from the in-app "Copy Settings" button',
+      '// to make the current tuning the new startup default.',
+      'window.TONOCHROME_DEFAULT_SETTINGS_JSON = String.raw`' + formatSettingsJSONC(config),
+      '`;',
+    ].join('\n');
+  }
+
+  async function copySettingsToClipboard() {
+    const text = formatDefaultSettingsScript(CONFIG);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const temp = document.createElement('textarea');
+        temp.value = text;
+        temp.setAttribute('readonly', 'true');
+        temp.style.position = 'absolute';
+        temp.style.left = '-9999px';
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        document.body.removeChild(temp);
+      }
+      setSettingsCopyStatus('Copied the current defaults script. Paste it into default-settings.js to make these settings the startup default.');
+      announce('Settings copied.');
+    } catch (err) {
+      console.error('[UI] Settings copy failed:', err);
+      setSettingsCopyStatus('Copy failed. Check clipboard permissions and try again.');
+    }
   }
 
   function bindDualPair(options) {
@@ -1249,6 +1524,15 @@ const UI = (() => {
     sync('minRange');
   }
 
+  function bindNumericInput(input, onChange) {
+    const sync = () => {
+      const value = parseFloat(input.value);
+      if (!Number.isNaN(value)) onChange(value);
+    };
+    ['input', 'change'].forEach(evt => input.addEventListener(evt, sync));
+    sync();
+  }
+
   function initSettingsPanel() {
     // Seed all inputs from CONFIG so it is the single source of truth.
     const C = CONFIG;
@@ -1258,17 +1542,22 @@ const UI = (() => {
     cfgHueBlendEndRange.value   = cfgHueBlendEndInput.value   = C.hue.blendEnd;
     cfgHueBlendLowFreqRange.value  = cfgHueBlendLowFreqInput.value  = C.hue.blendFreqLow;
     cfgHueBlendHighFreqRange.value = cfgHueBlendHighFreqInput.value = C.hue.blendFreqHigh;
-    cfgSatNoiseStartRange.value = cfgSatNoiseStartInput.value = C.saturation.noiseStart;
-    cfgSatNoiseEndRange.value   = cfgSatNoiseEndInput.value   = C.saturation.noiseEnd;
-    cfgNoiseGainMinRange.value  = cfgNoiseGainMinInput.value  = C.saturation.noiseGainMin;
-    cfgNoiseGainMaxRange.value  = cfgNoiseGainMaxInput.value  = C.saturation.noiseGainMax;
+    cfgSatBellStartRange.value = cfgSatBellStartInput.value = C.saturation.bellBlendStart;
+    cfgSatBellEndRange.value   = cfgSatBellEndInput.value   = C.saturation.bellBlendEnd;
     cfgVolStartRange.value = cfgVolStartInput.value = C.lightness.volumeStart;
     cfgVolEndRange.value   = cfgVolEndInput.value   = C.lightness.volumeEnd;
     cfgVolMinRange.value   = cfgVolMinInput.value   = C.lightness.volumeMin;
     cfgVolMaxRange.value   = cfgVolMaxInput.value   = C.lightness.volumeMax;
-    cfgBellBlendStartRange.value = cfgBellBlendStartInput.value = C.lightness.bellBlendStart;
-    cfgBellBlendEndRange.value   = cfgBellBlendEndInput.value   = C.lightness.bellBlendEnd;
-    cfgNoiseType.value           = C.noise.type;
+    cfgBrownNoiseStartRange.value = cfgBrownNoiseStartInput.value = C.lightness.brownNoiseStart;
+    cfgBrownNoiseEndRange.value   = cfgBrownNoiseEndInput.value   = C.lightness.brownNoiseEnd;
+    cfgPinkNoiseStartRange.value = cfgPinkNoiseStartInput.value = C.lightness.pinkNoiseStart;
+    cfgPinkNoiseEndRange.value   = cfgPinkNoiseEndInput.value   = C.lightness.pinkNoiseEnd;
+    cfgUpperNoiseType.value      = C.noise.upperType;
+    cfgLowerNoiseType.value      = C.noise.lowerType;
+    cfgBellNoiseType.value       = C.noise.bellType;
+    cfgNoiseUpperMaxGainInput.value = C.noise.upperMaxGain;
+    cfgNoiseLowerMaxGainInput.value = C.noise.lowerMaxGain;
+    cfgNoiseBellBoostInput.value = C.noise.bellResonanceBoost;
     cfgThereminWaveform.value    = C.theremin.waveform;
     cfgThereminLfoRateInput.value  = C.theremin.lfoRate;
     cfgThereminLfoDepthInput.value = C.theremin.lfoDepthRatio;
@@ -1297,17 +1586,10 @@ const UI = (() => {
     });
 
     bindDualPair({
-      minRange: cfgSatNoiseStartRange, maxRange: cfgSatNoiseEndRange,
-      minInput: cfgSatNoiseStartInput, maxInput: cfgSatNoiseEndInput,
+      minRange: cfgSatBellStartRange, maxRange: cfgSatBellEndRange,
+      minInput: cfgSatBellStartInput, maxInput: cfgSatBellEndInput,
       min: 0, max: 1, step: 0.01, integer: false, minGap: 0.01,
-      onChange: (a, b) => scheduleSettingsApply({ saturation: { noiseStart: a, noiseEnd: b } }),
-    });
-
-    bindDualPair({
-      minRange: cfgNoiseGainMinRange, maxRange: cfgNoiseGainMaxRange,
-      minInput: cfgNoiseGainMinInput, maxInput: cfgNoiseGainMaxInput,
-      min: 0, max: 1, step: 0.01, integer: false, minGap: 0,
-      onChange: (a, b) => scheduleSettingsApply({ saturation: { noiseGainMin: a, noiseGainMax: b } }),
+      onChange: (a, b) => scheduleSettingsApply({ saturation: { bellBlendStart: a, bellBlendEnd: b } }),
     });
 
     bindDualPair({
@@ -1325,14 +1607,41 @@ const UI = (() => {
     });
 
     bindDualPair({
-      minRange: cfgBellBlendStartRange, maxRange: cfgBellBlendEndRange,
-      minInput: cfgBellBlendStartInput, maxInput: cfgBellBlendEndInput,
+      minRange: cfgBrownNoiseStartRange, maxRange: cfgBrownNoiseEndRange,
+      minInput: cfgBrownNoiseStartInput, maxInput: cfgBrownNoiseEndInput,
       min: 0, max: 1, step: 0.01, integer: false, minGap: 0.01,
-      onChange: (a, b) => scheduleSettingsApply({ lightness: { bellBlendStart: a, bellBlendEnd: b } }),
+      onChange: (a, b) => scheduleSettingsApply({ lightness: { brownNoiseStart: a, brownNoiseEnd: b } }),
     });
 
-    cfgNoiseType.addEventListener('change', () => {
-      scheduleSettingsApply({ noise: { type: cfgNoiseType.value } });
+    bindDualPair({
+      minRange: cfgPinkNoiseStartRange, maxRange: cfgPinkNoiseEndRange,
+      minInput: cfgPinkNoiseStartInput, maxInput: cfgPinkNoiseEndInput,
+      min: 0, max: 1, step: 0.01, integer: false, minGap: 0.01,
+      onChange: (a, b) => scheduleSettingsApply({ lightness: { pinkNoiseStart: a, pinkNoiseEnd: b } }),
+    });
+
+    cfgUpperNoiseType.addEventListener('change', () => {
+      scheduleSettingsApply({ noise: { upperType: cfgUpperNoiseType.value } });
+    });
+
+    cfgLowerNoiseType.addEventListener('change', () => {
+      scheduleSettingsApply({ noise: { lowerType: cfgLowerNoiseType.value } });
+    });
+
+    cfgBellNoiseType.addEventListener('change', () => {
+      scheduleSettingsApply({ noise: { bellType: cfgBellNoiseType.value } });
+    });
+
+    bindNumericInput(cfgNoiseUpperMaxGainInput, (value) => {
+      scheduleSettingsApply({ noise: { upperMaxGain: value } });
+    });
+
+    bindNumericInput(cfgNoiseLowerMaxGainInput, (value) => {
+      scheduleSettingsApply({ noise: { lowerMaxGain: value } });
+    });
+
+    bindNumericInput(cfgNoiseBellBoostInput, (value) => {
+      scheduleSettingsApply({ noise: { bellResonanceBoost: value } });
     });
 
     cfgThereminWaveform.addEventListener('change', () => {
@@ -1354,6 +1663,10 @@ const UI = (() => {
           });
         });
       });
+
+    if (copySettingsBtn) {
+      copySettingsBtn.addEventListener('click', copySettingsToClipboard);
+    }
   }
 
   /**
@@ -1398,12 +1711,29 @@ const UI = (() => {
 
     // Info panel
     const freq = hueToFrequency(hsl.hue);
-    const noise = saturationToNoiseGain(hsl.saturation);
+    const pinkNoiseBlend = lightnessToPinkNoiseBlend(hsl.lightness);
+    const brownNoiseBlend = lightnessToBrownNoiseBlend(hsl.lightness);
     const vol = lightnessToVolume(hsl.lightness);
+    const bellBlend = saturationToBellBlend(hsl.saturation);
     const noteName = frequencyToNoteName(freq);
+    const bellBlendEndPct = Math.round(CONFIG.saturation.bellBlendEnd * 100);
+    const volumeEndPct = Math.round(CONFIG.lightness.volumeEnd * 100);
+    const brownNoiseEndPct = Math.round(CONFIG.lightness.brownNoiseEnd * 100);
+    const pinkNoiseStartPct = Math.round(CONFIG.lightness.pinkNoiseStart * 100);
+
+    if (satHint) {
+      satHint.textContent = `0-${bellBlendEndPct}%: bell blend`;
+    }
+    if (ligHint) {
+      ligHint.textContent = `0-${brownNoiseEndPct}%: brown noise + volume · ${pinkNoiseStartPct}-100%: pink noise crossfade`;
+    }
 
     freqDisplay.textContent = `${Math.round(freq)} Hz`;
-    noiseDisplay.textContent = `${Math.round(noise * 100)}%`;
+    if (brownNoiseBlend > 0) {
+      noiseDisplay.textContent = `${Math.round(brownNoiseBlend * 100)}% brown`;
+    } else {
+      noiseDisplay.textContent = `${Math.round(pinkNoiseBlend * 100)}% pink`;
+    }
     volDisplay.textContent = `${Math.round(vol * 100)}%`;
     if (noteDisplay) noteDisplay.textContent = noteName;
 
@@ -1411,18 +1741,18 @@ const UI = (() => {
     hueSlider.setAttribute('aria-valuetext',
       `${hueRounded} degrees — ${noteName}, ${Math.round(freq)} Hz`);
 
-    const noisePct = Math.round(noise * 100);
+    const bellBlendPct = Math.round(bellBlend * 100);
     let satDesc;
-    if (satPct === 0)        satDesc = 'pure noise, no tone';
-    else if (satPct >= 70)   satDesc = 'pure tone, no noise';
-    else                     satDesc = `${noisePct}% noise blend`;
+    if (satPct <= Math.round(CONFIG.saturation.bellBlendStart * 100)) satDesc = 'maximum bell blend';
+    else if (satPct >= bellBlendEndPct) satDesc = 'no bell blend';
+    else satDesc = `${bellBlendPct}% bell blend`;
     satSlider.setAttribute('aria-valuetext', `${satPct}% — ${satDesc}`);
 
-    const bellBlendPct = Math.round(lightnessToBellBlend(hsl.lightness) * 100);
     let ligDesc;
-    if (ligPct === 0)         ligDesc = 'silent';
-    else if (ligPct <= 50)    ligDesc = `volume ${Math.round(vol * 100)}%`;
-    else                      ligDesc = `full volume, bell blend ${bellBlendPct}%`;
+    if (ligPct === 0) ligDesc = 'silent';
+    else if (ligPct <= volumeEndPct) ligDesc = `volume ${Math.round(vol * 100)}%`;
+    else if (ligPct < pinkNoiseStartPct) ligDesc = `volume ${Math.round(vol * 100)}%, brown noise ${Math.round(brownNoiseBlend * 100)}%`;
+    else ligDesc = `full volume, pink noise ${Math.round(pinkNoiseBlend * 100)}%`;
     ligSlider.setAttribute('aria-valuetext', `${ligPct}% — ${ligDesc}`);
   }
 
