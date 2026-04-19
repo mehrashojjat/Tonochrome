@@ -129,6 +129,209 @@ Common nodes across all modes:
 
 ## UI
 
+Tonochrome now features a three-mode system that lets users choose their interaction style:
+
+### Mode Selection Screen
+
+The app launches on a **landing screen** with three mode cards displayed in a row:
+
+| Icon | Mode | Description |
+|------|------|-------------|
+| 👁️ | **Blind Mode** | Real-time camera-based color detection. Designed for blind and low-vision users. |
+| 🖼️ | **Photo Mode** | Load a photo and tap anywhere to sample colors. Interactive canvas-based exploration. |
+| 🎛️ | **Advance Mode** | Manual HSL sliders with full audio settings and controls. Best for sighted users. |
+
+Each card displays an icon (left), title (top right), and description (bottom right) for clarity. Clicking a card opens an instruction dialog with setup guidance.
+
+### Blind Mode
+
+**Design:** Two-pane vertical layout. Top half shows live camera feed; bottom half shows the current color, note name, frequency, and playback controls.
+
+**How it works:**
+1. Choose Blind Mode from the landing screen.
+2. Read the intro dialog explaining camera permission and what to expect.
+3. Read the **Sound Guide** — a detailed explanation of how pitch maps to hue, how noise indicates saturation, and how rumble/hiss indicate brightness.
+4. Grant camera access when prompted.
+5. Use the camera to point at any object. The app continuously detects and converts the color to sound in real time.
+6. Tap **Play** to enable audio. Tap **Stop** to disable it. Both the app and audio engine stay in their current state — this is not a pause.
+7. If your device has a flash, a **Flash button** appears in the top-right corner of the camera view.
+
+**Sound Guide (from the dialog):**
+- **Pitch (0°–360° hue) → Color:**
+  - Low pitch = Red / Orange  
+  - Mid pitch = Yellow / Green  
+  - High pitch = Blue / Violet  
+  - Highest pitch = approaching Red again (circle closes)
+
+- **Noise (saturation 0–100%) → Vividness:**
+  - Clean tone = Vivid, saturated color  
+  - Rough / noisy = Muted, desaturated color  
+  - Mostly noise = Grey or nearly grey
+
+- **Rumble vs Hiss (lightness 0–100%) → Brightness:**
+  - Low rumbling noise = Dark, near-black  
+  - Clear tone (no noise) = Mid-brightness, natural  
+  - Bright hissing noise = Light, near-white
+
+**Accessibility:** Fully designed for blind and low-vision users with continuous audio feedback and keyboard-friendly controls.
+
+### Photo Mode
+
+**Design:** Three-pane vertical layout. Top bar shows the current detected color, note name, and frequency. Middle area is the interactive canvas with the loaded image. Bottom bar has Pick Image, Play, and Mute buttons.
+
+**How it works:**
+1. Choose Photo Mode from the landing screen.
+2. Read the intro dialog.
+3. Tap **Pick Image** to load a photo from your device gallery.
+4. The image is automatically scaled and centered in the canvas (letterboxed if necessary).
+5. Tap **Play** to enable audio.
+6. **Tap or drag your finger** anywhere on the canvas:
+   - Inside the image → the sound plays from that pixel's color
+   - Outside the image (black area) → the audio engine runs but produces no sound (this is not mute — sound resumes when you tap back into the image)
+7. The color bar above the canvas updates in real time showing the current detected color.
+
+**Accessibility:** Canvas-based interaction with clear on-screen feedback. The entire canvas is clickable; tapping the letterbox area does not produce sound but does not stop the engine.
+
+### Advance Mode
+
+The original full UI with manual HSL sliders, all settings panels, and instrument presets. Identical to the previous version but now accessible from the mode selection screen.
+
+**Additional control:** A **Back button** in the top-left corner returns to the mode selection screen.
+
+### Dialog System
+
+Each mode has an **intro dialog** explaining what happens next:
+- All dialogs have a dark overlay (`#000000 @ 82% opacity`) and are centered on screen.
+- Dialogs trap keyboard focus (Tab/Shift-Tab stay within the dialog).
+- Press **Escape** to close any dialog and return focus to the button that opened it.
+- Buttons include Cancel and OK / Accept actions.
+- The Blind Mode includes a second dialog (**Sound Guide**) that explains the audio-to-color mapping before entering the mode.
+
+---
+
+## Accessibility
+
+Tonochrome is designed with comprehensive accessibility in mind across all three modes.
+
+### Screen Reader Support
+
+**All three screens and dialogs:**
+- Every focusable element has an explicit `aria-label` describing its purpose and current state.
+- Regions are marked with `role="main"`, `role="img"`, `role="group"`, `role="application"`, `role="dialog"`, etc.
+- A **skip link** at the top of every screen allows keyboard users to jump directly to the main content.
+
+**Blind Mode:**
+- The camera feed is labeled `aria-label="Live camera preview for color detection"`.
+- The color swatch is labeled `role="img" aria-label="Current detected color swatch"`.
+- The color label, note name, and frequency display use `aria-live="polite"` to announce updates as the camera detects new colors.
+- The Flash button's state is reflected via `aria-pressed="true|false"`.
+- Play and Mute buttons show state via `aria-pressed` and dynamically update their icon and text.
+
+**Photo Mode:**
+- The canvas is labeled `role="application"` with a detailed `aria-label` explaining how to interact.
+- The color swatch and label use `aria-live="polite"` to announce changes as you tap.
+- Play and Mute buttons show state via `aria-pressed`.
+- The file picker is hidden but labeled with `aria-label="Choose an image file from your device"`.
+
+**Advance Mode:**
+- All sliders have `aria-label` describing the parameter (e.g. *"Hue (0–360 degrees), controls pitch"*).
+- Sliders update `aria-valuetext` with meaningful descriptions as you move them:
+  - Hue: *"180 degrees — A3, 220 Hz"*
+  - Saturation: *"30% — 18% noise blend"*
+  - Lightness: *"75% — full volume, bell blend 50%"*
+- The play button shows state via `aria-pressed`.
+- Settings dropdowns and numeric inputs all have associated labels.
+
+**Global announcements:**
+- A polite `aria-live` region announces key events:
+  - *"Playing."* / *"Stopped."*
+  - *"Muted."* / *"Unmuted."*
+  - *"Synth mode."* when switching sound modes via keyboard (1 / 2 / 3).
+
+### Keyboard Navigation
+
+**All three screens:**
+- **Tab / Shift-Tab:** Navigate between all interactive controls (buttons, sliders, inputs, links).
+- **Enter / Space:** Activate focused buttons.
+- **Escape:** Close any open dialog and restore focus to the button that opened it.
+
+**Blind Mode:**
+- Play button: Space or click
+- Mute button: Space or click
+- Back button: Space or click
+- Flash button (if available): Space or click
+
+**Photo Mode:**
+- Pick Image button: Space or click (opens file picker)
+- Play button: Space or click
+- Mute button: Space or click
+- Back button: Space or click
+- Canvas: Click or tap to sample colors
+
+**Advance Mode:**
+- All keyboard shortcuts from the original version:
+  - **Space** *(no focus on button)* → Play / Stop
+  - **M** *(no focus on button)* → Mute / Unmute
+  - **1** → Synth mode
+  - **2** → Bell mode
+  - **3** → Theremin mode
+- Sliders use arrow keys (← → ↑ ↓) to adjust, as per native browser range input behaviour.
+
+### Focus Management
+
+- When a dialog opens, focus automatically moves to the first focusable element inside (usually the Cancel or OK button). A focus trap prevents Tab/Shift-Tab from leaving the dialog.
+- When a dialog closes, focus returns to the button that opened it, so the user's navigation context is preserved.
+- When switching screens (e.g. from Mode Selection to Blind Mode), focus moves to the Back button or the main heading of the new screen.
+- All focusable elements display a bright **#c8ff00 focus ring** with a soft halo when reached by keyboard.
+
+### Semantic HTML
+
+- Main content is marked with `<main id="main-content">` or `role="main"`.
+- Sections use `<section aria-label="...">` with clear labels.
+- Headings follow a logical hierarchy (h1 on landing screen, h2 inside screens, h3 in dialogs).
+- Form controls use `<label>` elements or `aria-label` where labels are not practical.
+- List structures (`<ul>`, `<ol>`, `<dl>`) are used for grouped information (e.g. color sound guide).
+
+### Colour Contrast
+
+- All text and interactive elements meet **WCAG AA** contrast ratios (4.5:1 for normal text, 3:1 for large elements) against the `#0d0d0d` background.
+- The neon chartreuse accent (`#c8ff00`) is used for focus rings, active states, and emphasis, providing high contrast.
+- Audio-only feedback (sound) complements all visual feedback so information is not conveyed by colour alone.
+
+### Touch Accessibility
+
+- All touch targets (buttons, sliders) are at least **36 × 36 px** (8 mm) for finger-friendly interaction.
+- Canvas in Photo Mode responds to both click and pointer events (pointer down + move).
+- Layout is fully responsive down to **360 px viewport width** (small phones).
+
+### High Contrast Mode Support
+
+- All interactive elements use explicit borders and focus rings so they remain visible in **Windows High Contrast Mode** (`forced-colors: active`).
+- State is conveyed using `aria-pressed`, text labels, and icons — not colour alone.
+
+### Accessible Dialogs
+
+- All dialogs have `role="dialog"` and `aria-modal="true"`.
+- Dialogs are labeled via `aria-labelledby` pointing to the dialog title.
+- Escape key closes the dialog (implemented in `ModeController._trapFocus`).
+- Focus is trapped inside the dialog while it is open.
+- The dialog overlay is keyboard-opaque; interactions only work on the dialog itself.
+
+### Summary
+
+| Dimension | Support |
+|-----------|---------|
+| **Keyboard navigation** | Full (Tab, Escape, arrow keys, Space, M, 1/2/3) |
+| **Screen readers** | Full (ARIA labels, roles, live regions, semantic HTML) |
+| **Focus management** | Full (visible focus ring, focus trapping in dialogs, focus restoration) |
+| **Audio feedback** | Full (all three modes provide rich audio description of colors) |
+| **High contrast** | Full (explicit borders, no colour-only feedback) |
+| **Touch accessibility** | Full (36+ px targets, responsive layout) |
+
+---
+
+## Previous UI (Advance Mode)
+
 | Element | Description |
 |---|---|
 | **Color swatch** | Live preview of the current HSL color |
@@ -193,64 +396,15 @@ Requires Web Audio API support. Works in all modern browsers:
 
 ---
 
-## Accessibility
-
-Tonochrome is designed to be fully usable by blind and disabled users. The audio output **is** the interface — colour is just one way to drive it. Every visual element has an accessible equivalent.
-
-### Screen Reader Support
-
-- **Skip link** — a visually hidden "Skip to main content" link becomes visible on focus, letting keyboard users bypass the header.
-- **ARIA live region** — a polite live region announces playback events:
-  - When Play is pressed: *"Playing. A4."*
-  - When Stop is pressed: *"Stopped."*
-  - When Mute / Unmute is pressed: *"Muted."* / *"Unmuted."*
-  - When a mode is switched via keyboard shortcut: *"Bell mode."*
-- **Note name display** — the info panel shows both the frequency in Hz and the musical note name (e.g. *A4*, *C3*) for any hue position.
-- **`aria-valuetext` on all sliders** — as you drag, the screen reader reads a meaningful description instead of a bare number:
-
-  | Slider | Example `aria-valuetext` |
-  |--------|--------------------------|
-  | Hue | *"180 degrees — A3, 220 Hz"* |
-  | Saturation | *"30% — 18% noise blend"* / *"0% — pure noise, no tone"* / *"100% — pure tone, no noise"* |
-  | Lightness | *"75% — full volume, bell blend 50%"* / *"30% — volume 57%"* |
-
-- All buttons use `aria-pressed` to reflect toggle state (Play/Stop, Mute/Unmute, Camera, Flash).
-- The keyboard shortcuts reference is provided as a screen-reader-only `<p>` linked to the main landmark via `aria-describedby`.
-
-### Keyboard Navigation
-
-All functionality is reachable without a mouse or touch screen:
-
-| Key | Action |
-|-----|--------|
-| **Tab / Shift-Tab** | Move focus between all interactive controls |
-| **Space / Enter** | Activate the focused button or slider |
-| **← → ↑ ↓** on sliders | Adjust slider value (native range behaviour) |
-| **Space** *(no focus on button/input)* | Play / Stop |
-| **M** *(no focus on button/input)* | Mute / Unmute |
-| **1** | Switch to Synth mode |
-| **2** | Switch to Bell mode |
-| **3** | Switch to Theremin mode |
-
-The sound mode is not shown in the UI — Theremin is the default. Power users can switch modes silently at any time using the 1 / 2 / 3 keys; the live region announces the change.
-
-### Focus Visibility
-
-Every focusable element shows a bright `#c8ff00` (neon chartreuse) focus ring when reached by keyboard — a ring plus a soft halo for maximum contrast against the dark background. The focus ring is visible in all supported browsers, including Firefox and Safari.
-
-### Colour Contrast and High-Contrast Mode
-
-- Text and interactive elements meet WCAG AA contrast ratios against the `#0d0d0d` background.
-- Windows High Contrast Mode (`forced-colors: active`) is fully supported — borders, focus rings, and active states use system colours so the UI remains clear regardless of the user's colour scheme.
-
-### Touch Accessibility
-
-- All touch targets (sliders, buttons) are at least 36 × 36 px.
-- Layout is responsive down to 360 px viewport width.
-- Camera and flash buttons include clear `aria-label` text that updates dynamically (e.g. *"Switch to color mode"* when camera is active).
-
----
-
 ## Design
 
-Dark scientific-instrument aesthetic with a neon-chartreuse (`#c8ff00`) accent on a near-black background (`#0d0d0d`). Slider thumbs are white circles for maximum contrast against all gradient tracks. All transitions are short (80–180 ms) to feel immediate without being jarring.
+Tonochrome uses a dark scientific-instrument aesthetic with a neon-chartreuse (`#c8ff00`) accent on a near-black background (`#0d0d0d`):
+
+- **Slider thumbs** are white circles for maximum contrast against all gradient tracks
+- **Mode cards** display icons (left), title, and description for clear affordance
+- **Dialogs** use a semi-transparent overlay and are centered on screen
+- **Transitions** are short (80–180 ms) to feel immediate without being jarring
+- **Focus rings** are bright neon with a soft halo for maximum visibility
+- **Audio is the primary interface** — all visual information is supplemented with sound
+
+## Running Locally
