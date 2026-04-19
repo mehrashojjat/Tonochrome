@@ -7,20 +7,290 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <a class="skip-link" href="#main-content">Skip to main content</a>
-    <main class="app" id="main-content" aria-describedby="kbd-shortcuts">
+    <a class="skip-link" href="#screen-select">Skip to main content</a>
 
-      <!-- Screen-reader-only keyboard shortcut reference -->
-      <p class="sr-only" id="kbd-shortcuts">
-        Keyboard shortcuts: Space to play or stop. M to mute or unmute.
-        Keys 1, 2, and 3 switch between Synth, Bell, and Theremin modes.
-        Arrow keys navigate between Sound Mode options when one is focused.
-      </p>
-
-      <header class="app-header">
-        <h1 class="app-title">Tonochrome</h1>
+    <!-- ══════════════════════════════════════════════
+         SCREEN: MODE SELECTION  (initial landing)
+    ══════════════════════════════════════════════ -->
+    <div id="screen-select" class="screen screen-select" role="main"
+         aria-label="Tonochrome — choose a mode to get started">
+      <header class="select-header">
+        <h1 class="app-title" tabindex="-1">Tonochrome</h1>
         <p class="app-subtitle">Color → Sound (HSL)</p>
       </header>
+      <nav class="mode-cards" aria-label="Mode selection">
+        <button class="mode-card" id="btnBlindMode">
+          <span class="mode-card-icon" aria-hidden="true">👁️</span>
+          <span class="mode-card-text">
+            <span class="mode-card-title">Blind Mode</span>
+            <span class="mode-card-desc">Camera-based continuous color detection. Designed for blind and low-vision users.</span>
+          </span>
+        </button>
+        <button class="mode-card" id="btnPhotoMode">
+          <span class="mode-card-icon" aria-hidden="true">🖼️</span>
+          <span class="mode-card-text">
+            <span class="mode-card-title">Photo Mode</span>
+            <span class="mode-card-desc">Load a photo and tap any spot on it to hear that color as a sound.</span>
+          </span>
+        </button>
+        <button class="mode-card" id="btnAdvanceMode">
+          <span class="mode-card-icon" aria-hidden="true">🎛️</span>
+          <span class="mode-card-text">
+            <span class="mode-card-title">Advance Mode</span>
+            <span class="mode-card-desc">Manual HSL sliders with full audio settings. Best for sighted users.</span>
+          </span>
+        </button>
+      </nav>
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         DIALOG: BLIND MODE — INTRO & INSTRUCTIONS
+    ══════════════════════════════════════════════ -->
+    <div id="dialog-blind" class="dialog-overlay" role="dialog" aria-modal="true"
+         aria-labelledby="dlg-blind-title" hidden>
+      <div class="dialog-card" role="document">
+        <h2 class="dialog-title" id="dlg-blind-title">Blind Mode</h2>
+        <div class="dialog-body">
+          <p>This mode is designed for blind and low-vision users. Here is what happens when you continue:</p>
+          <ul>
+            <li>Your device will ask for <strong>camera permission</strong>. Please allow it so the app can read the color from what your camera sees.</li>
+            <li>The app continuously detects the color your camera is pointing at and converts it to sound.</li>
+            <li>Tap the <strong>Play button</strong> at the bottom of the screen to start hearing the color as a sound. Tap <strong>Stop</strong> to silence it at any time.</li>
+            <li>The sound changes in real time as you move the camera toward different colors.</li>
+            <li>A <strong>Flash button</strong> will appear at the top of the camera view if your device supports it, so you can illuminate what you are pointing at.</li>
+          </ul>
+          <p>After tapping OK, a second screen will explain exactly what each sound means — which pitches represent which colors, and what the noise layers tell you about brightness and vividness.</p>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn dialog-btn-cancel" id="dlgBlindCancel">Cancel</button>
+          <button class="btn dialog-btn-ok" id="dlgBlindOk">OK — Show Sound Guide</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         DIALOG: BLIND MODE — COLOR-SOUND GUIDE
+    ══════════════════════════════════════════════ -->
+    <div id="dialog-blind-guide" class="dialog-overlay" role="dialog" aria-modal="true"
+         aria-labelledby="dlg-guide-title" hidden>
+      <div class="dialog-card dialog-card-tall" role="document">
+        <h2 class="dialog-title" id="dlg-guide-title">Sound and Color Guide</h2>
+        <div class="dialog-body dialog-body-scroll">
+
+          <h3 class="dialog-section">How pitch tells you the color</h3>
+          <p>The pitch of the sound — how high or low it is — tells you the hue, the color family. Pitch rises smoothly in this order from lowest to highest:</p>
+          <ol>
+            <li><strong>Lowest pitch</strong> — Deep Red.</li>
+            <li><strong>Low pitch</strong> — Orange.</li>
+            <li><strong>Low-medium pitch</strong> — Yellow. Bright, warm tones.</li>
+            <li><strong>Medium pitch</strong> — Green. This is the middle of the pitch range.</li>
+            <li><strong>Medium-high pitch</strong> — Cyan and Teal.</li>
+            <li><strong>High pitch</strong> — Blue. Cool tones at the higher notes.</li>
+            <li><strong>Very high pitch</strong> — Violet and Purple.</li>
+            <li>At the very highest pitches the sound blends back toward Red again, completing the circle of hues.</li>
+          </ol>
+
+          <h3 class="dialog-section">How noise tells you about color vividness</h3>
+          <p>The vividness of a color — called saturation — changes how clean or noisy the tone sounds.</p>
+          <ul>
+            <li>A <strong>clean, pure tone with no noise</strong> means the color is fully vivid and saturated — a strong, rich shade like a bright red, a deep blue, or a vivid green.</li>
+            <li>A <strong>tone with some roughness or noise mixed in</strong> means the color is less vivid — a muted, faded, or dusty shade.</li>
+            <li>A <strong>mostly or completely noisy sound with very little clear pitch</strong> means the color is nearly grey or completely grey, with almost no color at all.</li>
+          </ul>
+
+          <h3 class="dialog-section">How noise tells you about brightness</h3>
+          <p>The brightness of a color — called lightness — is carried by a separate noise layer on top of or under the main tone.</p>
+          <ul>
+            <li>A <strong>warm, low rumbling noise</strong> underneath the tone means the color is very dark — a near-black or deep dark shade.</li>
+            <li>A <strong>bright, airy hissing noise</strong> layered over the tone means the color is very bright — a near-white or heavily washed-out pale shade.</li>
+            <li><strong>No noise at all</strong>, just a clear tone at a comfortable volume, means the color is a true mid-brightness, naturally visible shade.</li>
+          </ul>
+
+          <h3 class="dialog-section">Quick reference summary</h3>
+          <ul>
+            <li>Low pitch, clean tone — dark or vivid Red.</li>
+            <li>Medium pitch, clean tone — vivid Green.</li>
+            <li>High pitch, clean tone — vivid Blue or Purple.</li>
+            <li>Any pitch, very noisy — grey or nearly grey with low saturation.</li>
+            <li>Any pitch, with a warm low rumble — dark or near-black shade.</li>
+            <li>Any pitch, with a bright hiss — light or near-white shade.</li>
+          </ul>
+
+        </div>
+        <div class="dialog-actions">
+          <button class="btn dialog-btn-cancel" id="dlgGuideBack">← Back</button>
+          <button class="btn dialog-btn-ok" id="dlgGuideOk">Enter Blind Mode</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         DIALOG: PHOTO MODE — INTRO & INSTRUCTIONS
+    ══════════════════════════════════════════════ -->
+    <div id="dialog-photo" class="dialog-overlay" role="dialog" aria-modal="true"
+         aria-labelledby="dlg-photo-title" hidden>
+      <div class="dialog-card" role="document">
+        <h2 class="dialog-title" id="dlg-photo-title">Photo Mode</h2>
+        <div class="dialog-body">
+          <p>In Photo Mode you explore colors in a photo by listening to their sounds.</p>
+          <ul>
+            <li>Tap <strong>Pick Image</strong> at the bottom to choose a photo from your device gallery.</li>
+            <li>Once the photo loads, tap <strong>Play</strong> to enable audio.</li>
+            <li>Then <strong>tap or drag your finger</strong> anywhere on the image to hear the sound of the color at that spot. The sound updates in real time as you move.</li>
+            <li>The current color being played is shown in the color bar above the image.</li>
+            <li>Tap <strong>Stop</strong> at any time to silence the audio.</li>
+            <li><strong>Accessibility note:</strong> If audio does not respond when you tap, your finger may be outside the image boundary. Move toward the center of the screen.</li>
+          </ul>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn dialog-btn-cancel" id="dlgPhotoCancel">Cancel</button>
+          <button class="btn dialog-btn-ok" id="dlgPhotoOk">Enter Photo Mode</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         DIALOG: ADVANCE MODE — INTRO & INSTRUCTIONS
+    ══════════════════════════════════════════════ -->
+    <div id="dialog-advance" class="dialog-overlay" role="dialog" aria-modal="true"
+         aria-labelledby="dlg-advance-title" hidden>
+      <div class="dialog-card" role="document">
+        <h2 class="dialog-title" id="dlg-advance-title">Advance Mode</h2>
+        <div class="dialog-body">
+          <p>Advance Mode gives you full manual control over color sounds using three sliders.</p>
+          <ul>
+            <li>The <strong>Hue slider</strong> controls pitch. Moving it left to right shifts the sound from deep red through orange, yellow, green, blue, and into violet.</li>
+            <li>The <strong>Saturation slider</strong> controls the vividness or greyness of the tone. Low saturation adds a bell-like resonance. High saturation gives a clean tone.</li>
+            <li>The <strong>Lightness slider</strong> controls volume and layered noise texture. Dark values add a low rumble. Mid-range plays a clear tone. Bright values layer an airy hiss.</li>
+            <li>The <strong>Advanced Settings</strong> panel lets you choose instrument presets, sound modes, and fine-tune all audio parameters.</li>
+          </ul>
+          <p><strong>Note for blind users:</strong> This mode requires manually moving three sliders and has no automatic color detection. If you have low or no vision, Blind Mode is strongly recommended instead — it works without any slider interaction.</p>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn dialog-btn-cancel" id="dlgAdvanceCancel">Cancel</button>
+          <button class="btn dialog-btn-ok" id="dlgAdvanceOk">Enter Advance Mode</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         SCREEN: BLIND MODE
+         Top half: camera  ·  Bottom half: color + controls
+    ══════════════════════════════════════════════ -->
+    <div id="screen-blind" class="screen screen-blind" hidden
+         aria-label="Blind Mode — camera color to sound">
+
+      <div class="blind-top" aria-label="Camera view">
+        <button class="btn-back" id="blindBackBtn"
+                aria-label="Leave Blind Mode and go back to mode selection">← Back</button>
+        <video id="blindCameraPreview" class="blind-video" autoplay muted playsinline
+               aria-label="Live camera preview for color detection"
+               aria-describedby="blindColorLabel"></video>
+        <button class="btn-flash" id="blindFlashBtn" aria-pressed="false" hidden
+                aria-label="Toggle flash">⚡</button>
+      </div>
+
+      <div class="blind-bottom">
+        <div class="blind-swatch" id="blindSwatch"
+             role="img" aria-label="Current detected color swatch"></div>
+        <p class="blind-color-label" id="blindColorLabel"
+           aria-live="polite" aria-atomic="true">—</p>
+        <dl class="blind-info" aria-label="Current color sound data">
+          <div class="blind-info-item">
+            <dt>Note</dt>
+            <dd id="blindNoteDisplay" aria-live="polite">—</dd>
+          </div>
+          <div class="blind-info-item">
+            <dt>Frequency</dt>
+            <dd id="blindFreqDisplay" aria-live="off">— Hz</dd>
+          </div>
+        </dl>
+        <section class="blind-playback" aria-label="Audio playback controls">
+          <button class="btn btn-play btn-large" id="blindPlayBtn" aria-pressed="false">
+            <span class="btn-icon" aria-hidden="true">▶</span>
+            <span class="btn-text">Play</span>
+          </button>
+          <button class="btn btn-mute btn-large" id="blindMuteBtn" aria-pressed="false" disabled>
+            <span class="btn-icon" aria-hidden="true">🔊</span>
+            <span class="btn-text">Mute</span>
+          </button>
+        </section>
+      </div>
+      <div id="blindSrAnnounce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         SCREEN: PHOTO MODE
+         Top bar: color display  ·  Middle: canvas  ·  Bottom: controls
+    ══════════════════════════════════════════════ -->
+    <div id="screen-photo" class="screen screen-photo" hidden
+         aria-label="Photo Mode — tap the image to hear color sounds">
+
+      <div class="photo-top-bar">
+        <button class="btn-back" id="photoBackBtn"
+                aria-label="Leave Photo Mode and go back to mode selection">← Back</button>
+        <div class="photo-color-bar" aria-label="Currently playing color">
+          <div class="photo-swatch" id="photoSwatch"
+               role="img" aria-label="Current color swatch"></div>
+          <div class="photo-color-info">
+            <p class="photo-color-label" id="photoColorLabel"
+               aria-live="polite" aria-atomic="true">Load a photo to begin</p>
+            <dl class="photo-info-row" aria-label="Color sound data">
+              <div class="photo-info-item"><dt>Note</dt><dd id="photoNoteDisplay" aria-live="polite">—</dd></div>
+              <div class="photo-info-item"><dt>Freq</dt><dd id="photoFreqDisplay" aria-live="off">— Hz</dd></div>
+            </dl>
+          </div>
+        </div>
+      </div>
+
+      <div class="photo-canvas-wrap">
+        <canvas id="photoCanvas" class="photo-canvas" tabindex="0"
+                role="application"
+                aria-label="Photo canvas. Tap or drag your finger to hear the sound of the color at that point. If the audio stops responding, your finger is outside the image. Move toward the center of the screen.">
+        </canvas>
+        <div class="photo-placeholder" id="photoPlaceholder" aria-hidden="true">
+          <p>Tap &ldquo;Pick Image&rdquo; below to load a photo</p>
+        </div>
+      </div>
+
+      <div class="photo-bottom-bar" role="group" aria-label="Photo mode controls">
+        <input type="file" id="photoFilePicker" accept="image/*" class="sr-only"
+               aria-label="Choose an image file from your device" />
+        <button class="btn" id="photoPickBtn">
+          <span class="btn-icon" aria-hidden="true">🖼️</span>
+          <span class="btn-text">Pick Image</span>
+        </button>
+        <button class="btn btn-play" id="photoPlayBtn" aria-pressed="false">
+          <span class="btn-icon" aria-hidden="true">▶</span>
+          <span class="btn-text">Play</span>
+        </button>
+        <button class="btn btn-mute" id="photoMuteBtn" aria-pressed="false" disabled>
+          <span class="btn-icon" aria-hidden="true">🔊</span>
+          <span class="btn-text">Mute</span>
+        </button>
+      </div>
+      <div id="photoSrAnnounce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         SCREEN: ADVANCE MODE  (original full UI, unchanged)
+    ══════════════════════════════════════════════ -->
+    <div id="screen-advance" class="screen screen-advance" hidden>
+      <main class="app" id="main-content" aria-describedby="kbd-shortcuts">
+        <button class="btn-back advance-back" id="advanceBackBtn"
+                aria-label="Leave Advance Mode and go back to mode selection">← Back</button>
+
+        <!-- Screen-reader-only keyboard shortcut reference -->
+        <p class="sr-only" id="kbd-shortcuts">
+          Keyboard shortcuts: Space to play or stop. M to mute or unmute.
+          Keys 1, 2, and 3 switch between Synth, Bell, and Theremin modes.
+          Arrow keys navigate between Sound Mode options when one is focused.
+        </p>
+
+        <header class="app-header">
+          <h2 class="app-title">Tonochrome</h2>
+          <p class="app-subtitle">Color → Sound (HSL)</p>
+        </header>
 
       <section class="color-preview" aria-label="Color preview">
         <div class="swatch-wrapper">
@@ -359,7 +629,8 @@
       <!-- Screen-reader live announcement region -->
       <div id="srAnnounce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
-    </main>
+      </main>
+    </div><!-- /screen-advance -->
 
     <script src="default-settings.js"></script>
     <script src="app.js"></script>

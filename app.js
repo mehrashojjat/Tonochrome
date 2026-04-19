@@ -1205,11 +1205,21 @@ const AudioEngine = (() => {
     await applySettings(params);
   }
 
+  /**
+   * Temporarily silence or restore the master output without changing
+   * the `muted` state. Used by Photo Mode when the pointer is outside the image.
+   */
+  function setSilenced(silenced) {
+    if (!masterGain || !ctx) return;
+    masterGain.gain.setTargetAtTime(silenced ? 0 : 1, ctx.currentTime, 0.04);
+  }
+
   return {
     start,
     stop,
     update,
     setMute,
+    setSilenced,
     setMode,
     applySettings,
     applyCharacterPreset,
@@ -1400,6 +1410,502 @@ const CameraEngine = (() => {
     get hasTorch() { return _hasTorch; },
     get isTorchOn() { return _torchOn; },
   };
+})();
+
+/* ============================================================
+   4a. MODE CONTROLLER  — screen switching + dialog management
+   ============================================================ */
+
+const ModeController = (() => {
+  // ── IDs ─────────────────────────────────────────────────────
+  const SCREEN_IDS = ['screen-select', 'screen-blind', 'screen-photo', 'screen-advance'];
+  const DIALOG_IDS = ['dialog-blind', 'dialog-blind-guide', 'dialog-photo', 'dialog-advance'];
+
+  // Track which element had focus before a dialog opened
+  let _dialogReturnFocus = null;
+
+  // ── Helpers ─────────────────────────────────────────────────
+
+  function showScreen(id) {
+    SCREEN_IDS.forEach(sid => {
+      const el = document.getElementById(sid);
+      if (el) el.hidden = (sid !== id);
+    });
+    // Set focus on the first heading / landmark so screen readers announce
+    const target = document.getElementById(id);
+    if (target) {
+      const heading = target.querySelector('[tabindex="-1"], h1, h2, button');
+      if (heading) heading.focus();
+    }
+    // Announce to ARIA live regions in case focus alone is not enough
+    const announcer = document.getElementById('srAnnounce');
+    if (announcer) {
+      const label = target ? (target.getAttribute('aria-label') || '') : '';
+      announcer.textContent = label;
+    }
+  }
+
+  // Focus trap: keep keyboard focus inside `container`
+  function _trapFocus(container, ev) {
+    const focusable = Array.from(
+      container.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter(el => !el.closest('[hidden]'));
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last  = focusable[focusable.length - 1];
+    if (ev.key === 'Tab') {
+      if (ev.shiftKey && document.activeElement === first) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && document.activeElement === last) {
+        ev.preventDefault();
+        first.focus();
+      }
+    }
+    if (ev.key === 'Escape') {
+      // find which dialog is open and close it
+      DIALOG_IDS.forEach(did => {
+        const d = document.getElementById(did);
+        if (d && !d.hidden) closeDialog(did);
+      });
+    }
+  }
+
+  function openDialog(id) {
+    _dialogReturnFocus = document.activeElement;
+    const dlg = document.getElementById(id);
+    if (!dlg) return;
+    dlg.hidden = false;
+    // Focus first button inside
+    const firstBtn = dlg.querySelector('button');
+    if (firstBtn) firstBtn.focus();
+    // Attach focus trap
+    dlg._trapHandler = (ev) => _trapFocus(dlg, ev);
+    document.addEventListener('keydown', dlg._trapHandler);
+  }
+
+  function closeDialog(id) {
+    const dlg = document.getElementById(id);
+    if (!dlg) return;
+    dlg.hidden = true;
+    if (dlg._trapHandler) {
+      document.removeEventListener('keydown', dlg._trapHandler);
+      dlg._trapHandler = null;
+    }
+    if (_dialogReturnFocus) {
+      _dialogReturnFocus.focus();
+      _dialogReturnFocus = null;
+    }
+  }
+
+  // ── Init ────────────────────────────────────────────────────
+
+  function init() {
+    // Show mode-select screen first
+    showScreen('screen-select');
+
+    // Mode card buttons → open their intro dialog
+    document.getElementById('btnBlindMode')  ?.addEventListener('click', () => openDialog('dialog-blind'));
+    document.getElementById('btnPhotoMode')  ?.addEventListener('click', () => openDialog('dialog-photo'));
+    document.getElementById('btnAdvanceMode')?.addEventListener('click', () => openDialog('dialog-advance'));
+
+    // Blind intro dialog
+    document.getElementById('dlgBlindCancel')?.addEventListener('click', () => closeDialog('dialog-blind'));
+    document.getElementById('dlgBlindOk')    ?.addEventListener('click', () => {
+      closeDialog('dialog-blind');
+      openDialog('dialog-blind-guide');
+    });
+
+    // Blind guide dialog
+    document.getElementById('dlgGuideBack')  ?.addEventListener('click', () => {
+      closeDialog('dialog-blind-guide');
+      openDialog('dialog-blind');
+    });
+    document.getElementById('dlgGuideOk')    ?.addEventListener('click', () => {
+      closeDialog('dialog-blind-guide');
+      showScreen('screen-blind');
+      BlindModeController.enter();
+    });
+
+    // Photo dialog
+    document.getElementById('dlgPhotoCancel')?.addEventListener('click', () => closeDialog('dialog-photo'));
+    document.getElementById('dlgPhotoOk')    ?.addEventListener('click', () => {
+      closeDialog('dialog-photo');
+      showScreen('screen-photo');
+      PhotoModeController.enter();
+    });
+
+    // Advance dialog
+    document.getElementById('dlgAdvanceCancel')?.addEventListener('click', () => closeDialog('dialog-advance'));
+    document.getElementById('dlgAdvanceOk')    ?.addEventListener('click', () => {
+      closeDialog('dialog-advance');
+      showScreen('screen-advance');
+    });
+
+    // Back buttons — leave mode and return to select screen
+    document.getElementById('blindBackBtn')  ?.addEventListener('click', () => {
+      BlindModeController.leave();
+      showScreen('screen-select');
+    });
+    document.getElementById('photoBackBtn')  ?.addEventListener('click', () => {
+      PhotoModeController.leave();
+      showScreen('screen-select');
+    });
+    document.getElementById('advanceBackBtn')?.addEventListener('click', () => {
+      AudioEngine.stop();
+      showScreen('screen-select');
+    });
+  }
+
+  return { init, showScreen, openDialog, closeDialog };
+})();
+
+/* ============================================================
+   4b. BLIND MODE CONTROLLER
+   ============================================================ */
+
+const BlindModeController = (() => {
+  let _playing = false;
+  let _muted   = false;
+  let _lastHSL = null;
+
+  // DOM refs (resolved lazily so they are available after DOMContentLoaded)
+  const el = () => ({
+    playBtn : document.getElementById('blindPlayBtn'),
+    muteBtn : document.getElementById('blindMuteBtn'),
+    swatch  : document.getElementById('blindSwatch'),
+    label   : document.getElementById('blindColorLabel'),
+    note    : document.getElementById('blindNoteDisplay'),
+    freq    : document.getElementById('blindFreqDisplay'),
+    video   : document.getElementById('blindCameraPreview'),
+    flash   : document.getElementById('blindFlashBtn'),
+    sr      : document.getElementById('blindSrAnnounce'),
+  });
+
+  function _onHSL(hsl) {
+    _lastHSL = hsl;
+    AudioEngine.update(hsl);
+
+    const e = el();
+    const freq = hueToFrequency(hsl.hue);
+    const satPct  = Math.round(hsl.saturation * 100);
+    const ligPct  = Math.round(hsl.lightness  * 100);
+    const hueR    = Math.round(hsl.hue);
+    if (e.swatch) e.swatch.style.background = `hsl(${hueR}, ${satPct}%, ${ligPct}%)`;
+    if (e.label)  e.label.textContent = `hsl(${hueR}, ${satPct}%, ${ligPct}%)`;
+    if (e.note) e.note.textContent = frequencyToNoteName(freq);
+    if (e.freq) e.freq.textContent = `${Math.round(freq)} Hz`;
+  }
+
+  function _syncPlayBtn() {
+    const e = el();
+    if (!e.playBtn) return;
+    e.playBtn.setAttribute('aria-pressed', String(_playing));
+    const icon = e.playBtn.querySelector('.btn-icon');
+    const text = e.playBtn.querySelector('.btn-text');
+    if (icon) icon.textContent = _playing ? '⏹' : '▶';
+    if (text) text.textContent = _playing ? 'Stop' : 'Play';
+    if (e.muteBtn) e.muteBtn.disabled = !_playing;
+  }
+
+  function _syncMuteBtn() {
+    const e = el();
+    if (!e.muteBtn) return;
+    e.muteBtn.setAttribute('aria-pressed', String(_muted));
+    const icon = e.muteBtn.querySelector('.btn-icon');
+    const text = e.muteBtn.querySelector('.btn-text');
+    if (icon) icon.textContent = _muted ? '🔇' : '🔊';
+    if (text) text.textContent = _muted ? 'Unmute' : 'Mute';
+  }
+
+  function enter() {
+    const e = el();
+    _playing = false;
+    _muted   = false;
+    _syncPlayBtn();
+    _syncMuteBtn();
+
+    // Flash button visibility
+    if (e.flash) e.flash.hidden = !CameraEngine.hasTorch;
+
+    // Start camera — must come before play button wiring so _lastHSL is populated ASAP
+    CameraEngine.start(e.video, _onHSL);
+
+    // Wire play/stop
+    if (e.playBtn) {
+      e.playBtn.onclick = () => {
+        if (_playing) {
+          AudioEngine.stop();
+          _playing = false;
+        } else {
+          // Use the last detected colour; fall back to a neutral mid-green if camera hasn't fired yet
+          const hsl = _lastHSL || { hue: 120, saturation: 0.8, lightness: 0.5 };
+          AudioEngine.start(hsl).catch(err => console.error('[BlindMode] AudioEngine.start failed:', err));
+          _playing = true;
+        }
+        _syncPlayBtn();
+      };
+    }
+
+    // Wire mute
+    if (e.muteBtn) {
+      e.muteBtn.onclick = () => {
+        _muted = !_muted;
+        AudioEngine.setMute(_muted);
+        _syncMuteBtn();
+      };
+    }
+
+    // Wire flash
+    if (e.flash) {
+      e.flash.onclick = () => {
+        CameraEngine.toggleTorch();
+        e.flash.setAttribute('aria-pressed', String(CameraEngine.isTorchOn));
+      };
+    }
+  }
+
+  function leave() {
+    CameraEngine.stop();
+    if (_playing) { AudioEngine.stop(); _playing = false; }
+    _muted   = false;
+    _lastHSL = null;
+    AudioEngine.setMute(false);
+
+    const e = el();
+    if (e.playBtn) e.playBtn.onclick = null;
+    if (e.muteBtn) e.muteBtn.onclick = null;
+    if (e.flash)   e.flash.onclick   = null;
+    _syncPlayBtn();
+    _syncMuteBtn();
+  }
+
+  return { enter, leave };
+})();
+
+/* ============================================================
+   4c. PHOTO MODE CONTROLLER
+   ============================================================ */
+
+const PhotoModeController = (() => {
+  let _playing        = false;
+  let _muted          = false;
+  let _imgRect        = null;
+  let _lastSampledHSL = null;
+  let _silenced       = false;  // true when pointer is outside the image
+
+  function _silence(yes) {
+    if (_silenced === yes) return;
+    _silenced = yes;
+    if (_playing) AudioEngine.setSilenced(yes);
+  }
+
+  const el = () => ({
+    canvas      : document.getElementById('photoCanvas'),
+    placeholder : document.getElementById('photoPlaceholder'),
+    filePicker  : document.getElementById('photoFilePicker'),
+    pickBtn     : document.getElementById('photoPickBtn'),
+    playBtn     : document.getElementById('photoPlayBtn'),
+    muteBtn     : document.getElementById('photoMuteBtn'),
+    swatch      : document.getElementById('photoSwatch'),
+    label       : document.getElementById('photoColorLabel'),
+    note        : document.getElementById('photoNoteDisplay'),
+    freq        : document.getElementById('photoFreqDisplay'),
+    sr          : document.getElementById('photoSrAnnounce'),
+  });
+
+  function _syncPlayBtn() {
+    const e = el();
+    if (!e.playBtn) return;
+    e.playBtn.setAttribute('aria-pressed', String(_playing));
+    const icon = e.playBtn.querySelector('.btn-icon');
+    const text = e.playBtn.querySelector('.btn-text');
+    if (icon) icon.textContent = _playing ? '⏹' : '▶';
+    if (text) text.textContent = _playing ? 'Stop' : 'Play';
+    if (e.muteBtn) e.muteBtn.disabled = !_playing;
+  }
+
+  function _syncMuteBtn() {
+    const e = el();
+    if (!e.muteBtn) return;
+    e.muteBtn.setAttribute('aria-pressed', String(_muted));
+    const icon = e.muteBtn.querySelector('.btn-icon');
+    const text = e.muteBtn.querySelector('.btn-text');
+    if (icon) icon.textContent = _muted ? '🔇' : '🔊';
+    if (text) text.textContent = _muted ? 'Unmute' : 'Mute';
+  }
+
+  // Convert RGB (0-255) → HSL (h 0-360, s 0-100, l 0-100)
+  function _rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0;
+    const l = (max + min) / 2;
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+        case g: h = ((b - r) / d + 2) / 6; break;
+        case b: h = ((r - g) / d + 4) / 6; break;
+      }
+    }
+    return { h: h * 360, s: s * 100, l: l * 100 };
+  }
+
+  function _sampleAt(clientX, clientY) {
+    const e = el();
+    if (!e.canvas || !_imgRect) return;
+
+    const rect  = e.canvas.getBoundingClientRect();
+    // Canvas logical size (may differ from CSS size if devicePixelRatio != 1)
+    const scaleX = e.canvas.width  / rect.width;
+    const scaleY = e.canvas.height / rect.height;
+    const cx = (clientX - rect.left)  * scaleX;
+    const cy = (clientY - rect.top)   * scaleY;
+
+    // Bounds check: only sample if inside the drawn image rect
+    if (cx < _imgRect.x || cx > _imgRect.x + _imgRect.w ||
+        cy < _imgRect.y || cy > _imgRect.y + _imgRect.h) {
+      _silence(true);  // Outside image = silence (no sound)
+      return;
+    }
+    _silence(false);  // Inside image = audible
+
+    const ctx = e.canvas.getContext('2d');
+    const px  = ctx.getImageData(Math.floor(cx), Math.floor(cy), 1, 1).data;
+    const hsl = _rgbToHsl(px[0], px[1], px[2]);
+
+    // Update color display
+    // hsl from canvas pixel has {h, s, l} (0-360, 0-100, 0-100) — convert to engine format
+    const hslNorm = { hue: hsl.h, saturation: hsl.s / 100, lightness: hsl.l / 100 };
+    _lastSampledHSL = hslNorm;
+    const freq = hueToFrequency(hsl.h);
+    if (e.swatch) e.swatch.style.background = `hsl(${Math.round(hsl.h)}, ${Math.round(hsl.s)}%, ${Math.round(hsl.l)}%)`;
+    if (e.label)  e.label.textContent = `hsl(${Math.round(hsl.h)}, ${Math.round(hsl.s)}%, ${Math.round(hsl.l)}%)`;
+    if (e.note) e.note.textContent = frequencyToNoteName(freq);
+    if (e.freq) e.freq.textContent = `${Math.round(freq)} Hz`;
+    if (_playing) AudioEngine.update(hslNorm);
+  }
+
+  function _loadImage(file) {
+    const e = el();
+    if (!e.canvas) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const ctx = e.canvas.getContext('2d');
+        // Size canvas to fill canvas-wrap, preserving aspect ratio
+        const wrap = e.canvas.parentElement;
+        const cw = wrap.clientWidth   || 400;
+        const ch = wrap.clientHeight  || 400;
+        e.canvas.width  = cw;
+        e.canvas.height = ch;
+
+        // Draw image centered, letterboxed
+        const scale = Math.min(cw / img.width, ch / img.height);
+        const dw = img.width  * scale;
+        const dh = img.height * scale;
+        const dx = (cw - dw) / 2;
+        const dy = (ch - dh) / 2;
+
+        ctx.clearRect(0, 0, cw, ch);
+        ctx.drawImage(img, dx, dy, dw, dh);
+        _imgRect = { x: dx, y: dy, w: dw, h: dh };
+
+        if (e.placeholder) e.placeholder.hidden = true;
+        if (e.sr) e.sr.textContent = 'Image loaded. Tap or drag anywhere on the image to hear its colors.';
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function enter() {
+    const e = el();
+    _playing = false;
+    _muted   = false;
+    _imgRect = null;
+    _syncPlayBtn();
+    _syncMuteBtn();
+
+    // Play/Stop
+    if (e.playBtn) {
+      e.playBtn.onclick = () => {
+        if (_playing) { AudioEngine.stop(); _playing = false; }
+        else {
+          // Use the last sampled colour; fall back to a neutral mid-green if no image tapped yet
+          const hsl = _lastSampledHSL || { hue: 120, saturation: 0.8, lightness: 0.5 };
+          _silenced = false;
+          AudioEngine.start(hsl).catch(err => console.error('[PhotoMode] AudioEngine.start failed:', err));
+          _playing = true;
+        }
+        _syncPlayBtn();
+      };
+    }
+
+    // Mute
+    if (e.muteBtn) {
+      e.muteBtn.onclick = () => {
+        _muted = !_muted;
+        AudioEngine.setMute(_muted);
+        _syncMuteBtn();
+      };
+    }
+
+    // Pick image button → trigger file picker
+    if (e.pickBtn) {
+      e.pickBtn.onclick = () => e.filePicker?.click();
+    }
+
+    // File picker change
+    if (e.filePicker) {
+      e.filePicker.onchange = (ev) => {
+        const file = ev.target.files?.[0];
+        if (file) _loadImage(file);
+        // Reset value so the same file can be picked again
+        e.filePicker.value = '';
+      };
+    }
+
+    // Pointer events on canvas for tap + drag
+    if (e.canvas) {
+      e.canvas.onpointerdown = (ev) => {
+        e.canvas.setPointerCapture(ev.pointerId);
+        _sampleAt(ev.clientX, ev.clientY);
+      };
+      e.canvas.onpointermove = (ev) => {
+        if (ev.buttons > 0) _sampleAt(ev.clientX, ev.clientY);
+      };
+      // Ensure touch doesn't scroll the page while dragging on canvas
+      e.canvas.style.touchAction = 'none';
+    }
+  }
+
+  function leave() {
+    if (_playing) { AudioEngine.stop(); _playing = false; }
+    _muted          = false;
+    _imgRect        = null;
+    _lastSampledHSL = null;
+    _silenced       = false;
+    AudioEngine.setMute(false);
+
+    const e = el();
+    if (e.canvas)     { e.canvas.onpointerdown = null; e.canvas.onpointermove = null; }
+    if (e.playBtn)    e.playBtn.onclick   = null;
+    if (e.muteBtn)    e.muteBtn.onclick   = null;
+    if (e.pickBtn)    e.pickBtn.onclick   = null;
+    if (e.filePicker) e.filePicker.onchange = null;
+    if (e.placeholder) e.placeholder.hidden = false;
+    _syncPlayBtn();
+    _syncMuteBtn();
+  }
+
+  return { enter, leave };
 })();
 
 /* ============================================================
@@ -2178,4 +2684,5 @@ const UI = (() => {
    ============================================================ */
 document.addEventListener("DOMContentLoaded", () => {
   UI.init();
+  ModeController.init();
 });

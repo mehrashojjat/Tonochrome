@@ -579,6 +579,526 @@ body {
   box-shadow: 0 0 0 3px var(--accent), 0 0 0 5px rgba(200, 255, 0, 0.25);
 }
 
+/* ============================================================
+   MULTI-SCREEN SYSTEM
+   ============================================================ */
+
+/* Body no longer pads/centers — each screen manages its own layout */
+body {
+  padding: 0;
+  align-items: stretch;
+  justify-content: stretch;
+  overflow-x: hidden;
+}
+
+.screen {
+  width: 100%;
+  min-height: 100dvh;
+}
+
+.screen[hidden] {
+  display: none !important;
+}
+
+/* ── Mode Selection Screen ── */
+.screen-select {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+  padding: 3rem 1.5rem 4rem;
+  background: var(--bg);
+}
+
+.select-header {
+  text-align: center;
+}
+
+.mode-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  max-width: 480px;
+}
+
+.mode-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.mode-card:hover {
+  background: var(--surface-raised);
+  border-color: #444;
+}
+
+.mode-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mode-card:active {
+  background: #222;
+}
+
+.mode-card-icon {
+  font-size: 2rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.mode-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.mode-card-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.mode-card-desc {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+}
+
+/* ── Back button (shared across mode screens) ── */
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+  z-index: 10;
+}
+
+.btn-back:hover { background: rgba(255, 255, 255, 0.1); }
+.btn-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Advance Mode screen ── */
+.screen-advance {
+  display: flex;
+  justify-content: center;
+  background: var(--bg);
+  overflow-y: auto;
+}
+
+.screen-advance .app {
+  padding: 1.5rem 1rem 4rem;
+}
+
+.advance-back {
+  margin-bottom: 0.75rem;
+}
+
+/* ── Large btn variant for blind mode ── */
+.btn-large {
+  padding: 1rem 1.25rem;
+  font-size: 0.9rem;
+}
+
+/* ============================================================
+   DIALOG / MODAL OVERLAY
+   ============================================================ */
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  z-index: 1000;
+  /* Animate in */
+  animation: dialogFadeIn 120ms ease;
+}
+
+.dialog-overlay[hidden] {
+  display: none !important;
+}
+
+@keyframes dialogFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.dialog-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.5);
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 480px;
+  max-height: 88dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+
+.dialog-card-tall {
+  max-height: 92dvh;
+}
+
+.dialog-title {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  overflow-y: auto;
+}
+
+.dialog-body-scroll {
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.dialog-body p,
+.dialog-body li {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.65;
+}
+
+.dialog-body strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.dialog-body ul,
+.dialog-body ol {
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.dialog-section {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-top: 0.5rem;
+  margin-bottom: 0.1rem;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.dialog-btn-cancel {
+  flex: 0 0 auto;
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.dialog-btn-ok {
+  flex: 1;
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.dialog-btn-ok:hover {
+  background: rgba(200, 255, 0, 0.22);
+}
+
+/* ============================================================
+   BLIND MODE SCREEN
+   ============================================================ */
+
+.screen-blind {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* Top half — camera */
+.blind-top {
+  flex: 1;
+  position: relative;
+  background: #000;
+  overflow: hidden;
+}
+
+.blind-top .btn-back {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+}
+
+.blind-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.btn-flash {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  z-index: 2;
+}
+
+.btn-flash[aria-pressed="true"] {
+  background: rgba(255, 220, 0, 0.25);
+  border-color: #ffd700;
+}
+
+.btn-flash[hidden] { display: none !important; }
+
+/* Bottom half — color + info + playback */
+.blind-bottom {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  padding: 1rem 1.5rem 1.5rem;
+  background: var(--bg);
+}
+
+.blind-swatch {
+  width: 100%;
+  height: 56px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: hsl(0, 100%, 50%);
+  transition: background 120ms ease;
+}
+
+.blind-color-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+}
+
+.blind-info {
+  display: flex;
+  gap: 2rem;
+}
+
+.blind-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: center;
+}
+
+.blind-info-item dt {
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-hint);
+}
+
+.blind-info-item dd {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.blind-playback {
+  display: flex;
+  gap: 0.75rem;
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.blind-playback .btn {
+  flex: 1;
+}
+
+/* ============================================================
+   PHOTO MODE SCREEN
+   ============================================================ */
+
+.screen-photo {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.photo-top-bar {
+  flex-shrink: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.photo-color-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.photo-swatch {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: hsl(0, 100%, 50%);
+  flex-shrink: 0;
+  transition: background 80ms ease;
+}
+
+.photo-color-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.photo-color-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.photo-info-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.photo-info-item {
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+
+.photo-info-item dt {
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-hint);
+}
+
+.photo-info-item dd {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.photo-canvas-wrap {
+  flex: 1;
+  position: relative;
+  background: #000;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.photo-canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.photo-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.photo-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-hint);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+
+.photo-placeholder[hidden] { display: none !important; }
+
+.photo-bottom-bar {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.photo-bottom-bar .btn {
+  flex: 1;
+}
+
 .btn:focus-visible,
 .btn-swatch:focus-visible {
   outline: 2px solid var(--accent);
