@@ -7,7 +7,16 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="app">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <main class="app" id="main-content" aria-describedby="kbd-shortcuts">
+
+      <!-- Screen-reader-only keyboard shortcut reference -->
+      <p class="sr-only" id="kbd-shortcuts">
+        Keyboard shortcuts: Space to play or stop. M to mute or unmute.
+        Keys 1, 2, and 3 switch between Synth, Bell, and Theremin modes.
+        Arrow keys navigate between Sound Mode options when one is focused.
+      </p>
+
       <header class="app-header">
         <h1 class="app-title">Tonochrome</h1>
         <p class="app-subtitle">Color → Sound (HSL)</p>
@@ -104,9 +113,10 @@
               value="50"
               step="1"
               aria-label="Lightness (0–100%), controls volume then bell blend"
+              aria-describedby="ligHint"
             />
           </div>
-          <p class="control-hint">0–50: volume, 50–100: bell blend</p>
+          <p class="control-hint" id="ligHint">0–50%: volume · 50–100%: bell blend</p>
         </div>
       </section>
 
@@ -124,6 +134,10 @@
       <section class="mapping-info" aria-label="Mapping information">
         <dl class="mapping-list">
           <div class="mapping-item">
+            <dt>Note</dt>
+            <dd id="noteDisplay">—</dd>
+          </div>
+          <div class="mapping-item">
             <dt>Frequency</dt>
             <dd id="freqDisplay">— Hz</dd>
           </div>
@@ -137,6 +151,10 @@
           </div>
         </dl>
       </section>
+
+      <!-- Screen-reader live announcement region -->
+      <div id="srAnnounce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
     </main>
 
     <script src="app.js"></script>

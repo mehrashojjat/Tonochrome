@@ -35,10 +35,12 @@ The two channels are complementary (`√sat` and `√(1−sat)`), so the total p
 
 ### Lightness → Volume + Bell blend
 
-Lightness now has two zones:
+Lightness has two zones, and the behaviour applies in **Synth and Theremin modes** (in Bell mode harmonics always play at full strength):
 
 - **0–50%**: controls master volume from silence up to maximum (capped at 80%) with a mild power curve for natural loudness.
-- **50–100%**: volume stays at maximum while the **Bell timbre blends in** from 0% to 100%.
+- **50–100%**: volume stays at maximum while **Bell harmonics blend in** from 0% to 100% using an **equal-power crossfade** (square-root curve). As the colour becomes brighter, the sound grows richer — a warm, piano-like harmonic layer fades in on top of the base voice. At L = 100% the base voice and the bell layer sit at equal perceived loudness (each at √0.5 ≈ 71% gain).
+
+In **Bell mode** Lightness only controls volume (0–50% zone); the harmonic layer always runs at full strength regardless of Lightness.
 
 ---
 
@@ -110,7 +112,7 @@ Common nodes across all modes:
 | **Synth / Bell / Theremin** | Sound mode selector — switches the synthesis method in real time |
 | **Play / Stop** | Starts or stops the audio engine |
 | **Mute / Unmute** | Silences audio without stopping the engine |
-| **Info panel** | Live readout: Frequency (Hz), Noise blend (%), Volume (%) |
+| **Info panel** | Live readout: Note name, Frequency (Hz), Noise blend (%), Volume (%) |
 
 ---
 
@@ -142,7 +144,7 @@ Tonochrome/
 
 ### `app.js` modules
 
-- **Section 1 — Audio mapping** (pure functions, no browser dependencies): `hueToFrequency`, `saturationToNoiseGain`, `saturationToOscGain`, `lightnessToVolume`
+- **Section 1 — Audio mapping** (pure functions, no browser dependencies): `hueToFrequency`, `saturationToNoiseGain`, `saturationToOscGain`, `lightnessToVolume`, `lightnessToBellBlend`, `frequencyToNoteName`
 - **Section 2 — AudioEngine** (IIFE): manages the Web Audio graph, exposes `start`, `stop`, `update`, `setMute`, `setMode`
   - `buildSynthGraph` — sine oscillator + pink noise
   - `buildBellGraph` — additive harmonic synthesis + pink noise
@@ -167,11 +169,61 @@ Requires Web Audio API support. Works in all modern browsers:
 
 ## Accessibility
 
-- All sliders have descriptive `aria-label` attributes
-- Play and Mute buttons use `aria-pressed` to reflect state
-- Focus rings are visible (accent-coloured outline)
-- Font is monospace (`SF Mono`, `Fira Code`, `Menlo`, `Consolas`) for readability
-- Layout is responsive down to 360 px viewport width
+Tonochrome is designed to be fully usable by blind and disabled users. The audio output **is** the interface — colour is just one way to drive it. Every visual element has an accessible equivalent.
+
+### Screen Reader Support
+
+- **Skip link** — a visually hidden "Skip to main content" link becomes visible on focus, letting keyboard users bypass the header.
+- **ARIA live regions** — two regions (polite and assertive) announce playback events:
+  - When Play is pressed: *"Playing. A4, Theremin mode."*
+  - When Stop is pressed: *"Stopped."*
+  - When Mute / Unmute is pressed: *"Muted."* / *"Unmuted."*
+  - When a sound mode is selected: *"Bell mode."*
+- **Note name display** — the info panel shows both the frequency in Hz and the musical note name (e.g. *A4*, *C3*) for any hue position.
+- **`aria-valuetext` on all sliders** — as you drag, the screen reader reads a meaningful description instead of a bare number:
+
+  | Slider | Example `aria-valuetext` |
+  |--------|--------------------------|
+  | Hue | *"180 degrees — A3, 220 Hz"* |
+  | Saturation | *"30% — 18% noise blend"* / *"0% — pure noise, no tone"* / *"100% — pure tone, no noise"* |
+  | Lightness | *"75% — full volume, bell blend 50%"* / *"30% — volume 57%"* |
+
+- **Sound Mode selector** uses `role="radiogroup"` / `role="radio"` with `aria-checked` state so screen readers announce the active mode correctly.
+- All buttons use `aria-pressed` to reflect toggle state (Play/Stop, Mute/Unmute, Camera, Flash).
+- The keyboard shortcuts reference is provided as a screen-reader-only `<p>` linked to the main landmark via `aria-describedby`.
+
+### Keyboard Navigation
+
+All functionality is reachable without a mouse or touch screen:
+
+| Key | Action |
+|-----|--------|
+| **Tab / Shift-Tab** | Move focus between all interactive controls |
+| **Space / Enter** | Activate the focused button or slider |
+| **← → ↑ ↓** on sliders | Adjust slider value (native range behaviour) |
+| **← → ↑ ↓** on Sound Mode | Navigate between Synth / Bell / Theremin and activate |
+| **Space** *(no focus on button/input)* | Play / Stop |
+| **M** *(no focus on button/input)* | Mute / Unmute |
+| **1** | Switch to Synth mode |
+| **2** | Switch to Bell mode |
+| **3** | Switch to Theremin mode |
+
+The Sound Mode selector follows the WAI-ARIA radiogroup keyboard pattern: arrow keys both move focus and activate the new mode. Only the active mode button is in the Tab order; the others are skipped and reached via arrows.
+
+### Focus Visibility
+
+Every focusable element shows a bright `#c8ff00` (neon chartreuse) focus ring when reached by keyboard — a ring plus a soft halo for maximum contrast against the dark background. The focus ring is visible in all supported browsers, including Firefox and Safari.
+
+### Colour Contrast and High-Contrast Mode
+
+- Text and interactive elements meet WCAG AA contrast ratios against the `#0d0d0d` background.
+- Windows High Contrast Mode (`forced-colors: active`) is fully supported — borders, focus rings, and active states use system colours so the UI remains clear regardless of the user's colour scheme.
+
+### Touch Accessibility
+
+- All touch targets (sliders, buttons) are at least 36 × 36 px.
+- Layout is responsive down to 360 px viewport width.
+- Camera and flash buttons include clear `aria-label` text that updates dynamically (e.g. *"Switch to color mode"* when camera is active).
 
 ---
 

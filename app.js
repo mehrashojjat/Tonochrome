@@ -142,6 +142,21 @@ function lightnessToBellBlend(lightness) {
   return Math.min((lightness - 0.5) / 0.5, 1);
 }
 
+/**
+ * Frequency → Musical note name (e.g. 440 → "A4").
+ * Uses equal-temperament based on A4 = 440 Hz.
+ *
+ * @param {number} freq - frequency in Hz
+ * @returns {string} note name with octave (e.g. "C3", "F#4")
+ */
+function frequencyToNoteName(freq) {
+  const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const semitones = Math.round(12 * Math.log2(freq / 440)) + 69; // MIDI note number
+  const octave = Math.floor(semitones / 12) - 1;
+  const name = NOTE_NAMES[((semitones % 12) + 12) % 12];
+  return `${name}${octave}`;
+}
+
 /* Bell mode harmonic partials: ratio relative to fundamental and peak gain */
 const BELL_HARMONICS = [
   { ratio: 1,   gain: 1.00 }, // fundamental
@@ -824,6 +839,7 @@ const UI = (() => {
   const freqDisplay = document.getElementById("freqDisplay");
   const noiseDisplay = document.getElementById("noiseDisplay");
   const volDisplay = document.getElementById("volDisplay");
+  const noteDisplay = document.getElementById("noteDisplay");
 
   const satHint = document.getElementById("satHint");
 
@@ -831,6 +847,17 @@ const UI = (() => {
   const flashBtn = document.getElementById("flashBtn");
   const cameraPreview = document.getElementById("cameraPreview");
   const swatchWrapper = document.querySelector(".swatch-wrapper");
+
+  const srAnnounce = document.getElementById("srAnnounce");
+
+  // --- Screen-reader announcement helpers ---
+  let _announceTimer = null;
+  function announce(msg) {
+    if (!srAnnounce) return;
+    srAnnounce.textContent = '';
+    clearTimeout(_announceTimer);
+    _announceTimer = setTimeout(() => { srAnnounce.textContent = msg; }, 60);
+  }
 
   /**
    * Read current HSL values from sliders.
@@ -876,10 +903,30 @@ const UI = (() => {
     const freq = hueToFrequency(hsl.hue);
     const noise = saturationToNoiseGain(hsl.saturation);
     const vol = lightnessToVolume(hsl.lightness);
+    const noteName = frequencyToNoteName(freq);
 
     freqDisplay.textContent = `${Math.round(freq)} Hz`;
     noiseDisplay.textContent = `${Math.round(noise * 100)}%`;
     volDisplay.textContent = `${Math.round(vol * 100)}%`;
+    if (noteDisplay) noteDisplay.textContent = noteName;
+
+    // aria-valuetext: meaningful descriptions for screen readers
+    hueSlider.setAttribute('aria-valuetext',
+      `${hueRounded} degrees — ${noteName}, ${Math.round(freq)} Hz`);
+
+    const noisePct = Math.round(noise * 100);
+    let satDesc;
+    if (satPct === 0)        satDesc = 'pure noise, no tone';
+    else if (satPct >= 70)   satDesc = 'pure tone, no noise';
+    else                     satDesc = `${noisePct}% noise blend`;
+    satSlider.setAttribute('aria-valuetext', `${satPct}% — ${satDesc}`);
+
+    const bellBlendPct = Math.round(lightnessToBellBlend(hsl.lightness) * 100);
+    let ligDesc;
+    if (ligPct === 0)         ligDesc = 'silent';
+    else if (ligPct <= 50)    ligDesc = `volume ${Math.round(vol * 100)}%`;
+    else                      ligDesc = `full volume, bell blend ${bellBlendPct}%`;
+    ligSlider.setAttribute('aria-valuetext', `${ligPct}% — ${ligDesc}`);
   }
 
   /**
@@ -890,15 +937,21 @@ const UI = (() => {
     playBtn.querySelector(".btn-icon").textContent = playing ? "■" : "▶";
     playBtn.querySelector(".btn-text").textContent = playing ? "Stop" : "Play";
     muteBtn.disabled = !playing;
+
+    if (playing) {
+      const hsl = getHSL();
+      const note = frequencyToNoteName(hueToFrequency(hsl.hue));
+      announce(`Playing. ${note}.`);
+    } else {
+      announce('Stopped.');
+    }
   }
 
-  /**
-   * Sync mute button appearance to state.
-   */
   function updateMuteBtn(muted) {
     muteBtn.setAttribute("aria-pressed", String(muted));
     muteBtn.querySelector(".btn-icon").textContent = muted ? "🔇" : "🔊";
     muteBtn.querySelector(".btn-text").textContent = muted ? "Unmute" : "Mute";
+    if (AudioEngine.isRunning) announce(muted ? 'Muted.' : 'Unmuted.');
   }
 
   /**
@@ -1029,6 +1082,44 @@ const UI = (() => {
   }
 
   /**
+   * Global keyboard shortcuts.
+   * Not triggered when focus is inside an input, button, or select so as not
+   * to clobber native control behaviour.
+   */
+  function onGlobalKeydown(e) {
+    // Only fire when focus is not on an interactive form element
+    const tag = (document.activeElement && document.activeElement.tagName.toLowerCase()) || '';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    // Allow button keyboard shortcuts only when focus is NOT on a button (Space / Enter already trigger it)
+    const onButton = tag === 'button';
+
+    switch (e.key) {
+      case ' ':
+        if (!onButton) { e.preventDefault(); onPlayClick(); }
+        break;
+      case 'm':
+      case 'M':
+        if (!onButton && AudioEngine.isRunning) { e.preventDefault(); onMuteClick(); }
+        break;
+      case '1':
+        e.preventDefault();
+        AudioEngine.setMode('synth');
+        announce('Synth mode.');
+        break;
+      case '2':
+        e.preventDefault();
+        AudioEngine.setMode('bell');
+        announce('Bell mode.');
+        break;
+      case '3':
+        e.preventDefault();
+        AudioEngine.setMode('theremin');
+        announce('Theremin mode.');
+        break;
+    }
+  }
+
+  /**
    * Initialise UI.
    */
   function init() {
@@ -1047,6 +1138,7 @@ const UI = (() => {
     cameraBtn.addEventListener("click", onCameraClick);
     flashBtn.addEventListener("click", onFlashClick);
 
+    document.addEventListener("keydown", onGlobalKeydown);
     document.addEventListener("visibilitychange", onVisibilityChange);
   }
 

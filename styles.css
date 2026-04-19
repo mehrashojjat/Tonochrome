@@ -379,8 +379,6 @@ body {
   line-height: 1;
 }
 
-/* ---------- Sound mode selector ---------- */
-
 /* ---------- Mapping info ---------- */
 .mapping-info {
   border: 1px solid var(--border);
@@ -391,7 +389,7 @@ body {
 
 .mapping-list {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.5rem;
 }
 
@@ -420,14 +418,80 @@ body {
   cursor: not-allowed;
 }
 
-/* ---------- Focus ring ---------- */
-.slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px var(--accent);
+/* ---------- Visually hidden (screen-reader only) ---------- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.btn:focus-visible {
+/* ---------- Skip link ---------- */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: #000;
+  font-family: var(--font);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  border-radius: var(--radius);
+  z-index: 999;
+  transition: top var(--transition-fast);
+}
+
+.skip-link:focus {
+  top: 0.75rem;
+}
+
+/* ---------- Focus ring ---------- */
+.slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--accent), 0 0 0 5px rgba(200, 255, 0, 0.25);
+}
+
+.slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--accent), 0 0 0 5px rgba(200, 255, 0, 0.25);
+}
+
+.btn:focus-visible,
+.btn-swatch:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ---------- High-contrast mode (Windows forced-colors) ---------- */
+@media (forced-colors: active) {
+  .slider::-webkit-slider-thumb {
+    background: ButtonText;
+    border-color: ButtonText;
+    forced-color-adjust: none;
+  }
+  .slider::-moz-range-thumb {
+    background: ButtonText;
+    border-color: ButtonText;
+    forced-color-adjust: none;
+  }
+  .btn,
+  .btn-swatch {
+    border: 2px solid ButtonText;
+  }
+  .btn:focus-visible,
+  .btn-swatch:focus-visible,
+  .slider:focus-visible::-webkit-slider-thumb,
+  .slider:focus-visible::-moz-range-thumb {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+    box-shadow: none;
+  }
 }
 
 /* ---------- Responsive ---------- */
