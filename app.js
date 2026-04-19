@@ -110,6 +110,12 @@ const FALLBACK_CONFIG = {
     inharmonicRatio: 4.2,
     brightness: 1,
   },
+  synth: {
+    waveform: 'sine',
+  },
+  sound: {
+    character: 'default',
+  },
 };
 
 function deepClone(value) {
@@ -167,6 +173,56 @@ function loadDefaultConfig() {
 }
 
 const CONFIG = loadDefaultConfig();
+
+/**
+ * Instrument character presets.
+ * Each preset defines synth/theremin/bell/noise parameters that together
+ * shape the timbre produced by the Hue (pitch) slider.
+ * The 'default' preset preserves the original sound unchanged.
+ */
+const SOUND_CHARACTER_PRESETS = {
+  default: {
+    label: 'Default',
+    synth:    { waveform: 'sine' },
+    theremin: { waveform: 'sine',     lfoRate: 5,   lfoDepthRatio: 0.012 },
+    bell:     { inharmonicRatio: 4.2, brightness: 1 },
+    noise:    { bellResonanceBoost: 1.2 },
+  },
+  piano: {
+    label: 'Piano',
+    // Triangle wave: rich in odd harmonics (1, 3, 5…) — noticeably different from sine.
+    // Very high brightness + bellResonanceBoost recreate the overtone ring of piano strings.
+    // Near-zero vibrato: piano keys produce no mechanical vibrato.
+    synth:    { waveform: 'triangle' },
+    theremin: { waveform: 'triangle', lfoRate: 1,   lfoDepthRatio: 0.001 },
+    bell:     { inharmonicRatio: 4.8, brightness: 4.5 },
+    noise:    { bellResonanceBoost: 5.5 },
+  },
+  strings: {
+    label: 'Strings',
+    synth:    { waveform: 'sawtooth' },
+    theremin: { waveform: 'sawtooth', lfoRate: 5.5, lfoDepthRatio: 0.020 },
+    bell:     { inharmonicRatio: 4.2, brightness: 0.5 },
+    noise:    { bellResonanceBoost: 0.6 },
+  },
+  organ: {
+    label: 'Organ',
+    synth:    { waveform: 'square' },
+    theremin: { waveform: 'square',   lfoRate: 5,   lfoDepthRatio: 0.007 },
+    bell:     { inharmonicRatio: 4.2, brightness: 0.4 },
+    noise:    { bellResonanceBoost: 0.3 },
+  },
+  flute: {
+    label: 'Flute',
+    // Pure sine fundamental (flute is nearly a single partial).
+    // High lfoDepthRatio gives the characteristic flute vibrato wobble.
+    // Near-zero bell resonance: no harmonic overtones.
+    synth:    { waveform: 'sine' },
+    theremin: { waveform: 'sine',     lfoRate: 5.5, lfoDepthRatio: 0.048 },
+    bell:     { inharmonicRatio: 4.2, brightness: 0.05 },
+    noise:    { bellResonanceBoost: 0.05 },
+  },
+};
 
 function clamp01(v) {
   return Math.min(Math.max(v, 0), 1);
@@ -523,7 +579,7 @@ const AudioEngine = (() => {
 
     // Primary oscillator
     oscillator = ctx.createOscillator();
-    oscillator.type = "sine";
+    oscillator.type = CONFIG.synth.waveform;
     oscillator.frequency.value = freqA;
 
     gainOsc = ctx.createGain();
@@ -531,7 +587,7 @@ const AudioEngine = (() => {
 
     // Secondary oscillator — active only in hue blend zone (purple→red)
     oscillator2 = ctx.createOscillator();
-    oscillator2.type = "sine";
+    oscillator2.type = CONFIG.synth.waveform;
     oscillator2.frequency.value = freqB;
 
     gainOsc2 = ctx.createGain();
@@ -693,7 +749,7 @@ const AudioEngine = (() => {
 
     // Secondary oscillator for hue blend zone — no LFO (stationary 110 Hz tone)
     oscillator2 = ctx.createOscillator();
-    oscillator2.type = 'sine';
+    oscillator2.type = CONFIG.theremin.waveform;
     oscillator2.frequency.value = freqB;
 
     gainOsc2 = ctx.createGain();
@@ -1045,6 +1101,19 @@ const AudioEngine = (() => {
     }
   }
 
+  /**
+   * Apply a named instrument character preset to CONFIG and rebuild the graph.
+   * The 'default' preset restores the original sound.
+   * @param {string} name - key from SOUND_CHARACTER_PRESETS
+   */
+  async function applyCharacterPreset(name) {
+    const preset = SOUND_CHARACTER_PRESETS[name];
+    if (!preset) return;
+    CONFIG.sound.character = name;
+    const { label: _label, ...params } = preset;
+    await applySettings(params);
+  }
+
   return {
     start,
     stop,
@@ -1052,6 +1121,7 @@ const AudioEngine = (() => {
     setMute,
     setMode,
     applySettings,
+    applyCharacterPreset,
     get config() { return CONFIG; },
     get isRunning() { return running; },
     get isMuted() { return muted; },
@@ -1329,6 +1399,7 @@ const UI = (() => {
   const cfgThereminLfoDepthInput = document.getElementById("cfgThereminLfoDepthInput");
   const cfgBellInharmonicInput = document.getElementById("cfgBellInharmonicInput");
   const cfgBellBrightnessInput = document.getElementById("cfgBellBrightnessInput");
+  const cfgSoundCharacter = document.getElementById("cfgSoundCharacter");
   const copySettingsBtn = document.getElementById("copySettingsBtn");
   const settingsCopyStatus = document.getElementById("settingsCopyStatus");
 
@@ -1425,6 +1496,11 @@ const UI = (() => {
       '  "bell": {',
       `    "inharmonicRatio": ${C.bell.inharmonicRatio},`,
       `    "brightness": ${C.bell.brightness}`,
+      '  },',
+      '',
+      '  // Synth mode oscillator waveform (used in Synth sound mode).',
+      '  "synth": {',
+      `    "waveform": ${JSON.stringify(C.synth ? C.synth.waveform : 'sine')}`,
       '  }',
       '}',
     ].join('\n');
@@ -1563,6 +1639,30 @@ const UI = (() => {
     cfgThereminLfoDepthInput.value = C.theremin.lfoDepthRatio;
     cfgBellInharmonicInput.value   = C.bell.inharmonicRatio;
     cfgBellBrightnessInput.value   = C.bell.brightness;
+    if (cfgSoundCharacter) cfgSoundCharacter.value = C.sound ? (C.sound.character || 'default') : 'default';
+
+    // Syncs affected controls back to CONFIG after a preset is applied.
+    function syncSoundCharacterUIFromConfig() {
+      const cfg = CONFIG;
+      cfgNoiseUpperMaxGainInput.value  = cfg.noise.upperMaxGain;
+      cfgNoiseLowerMaxGainInput.value  = cfg.noise.lowerMaxGain;
+      cfgNoiseBellBoostInput.value     = cfg.noise.bellResonanceBoost;
+      cfgThereminWaveform.value        = cfg.theremin.waveform;
+      cfgThereminLfoRateInput.value    = cfg.theremin.lfoRate;
+      cfgThereminLfoDepthInput.value   = cfg.theremin.lfoDepthRatio;
+      cfgBellInharmonicInput.value     = cfg.bell.inharmonicRatio;
+      cfgBellBrightnessInput.value     = cfg.bell.brightness;
+    }
+
+    if (cfgSoundCharacter) {
+      cfgSoundCharacter.addEventListener('change', async () => {
+        await AudioEngine.applyCharacterPreset(cfgSoundCharacter.value);
+        syncSoundCharacterUIFromConfig();
+        const hsl = getHSL();
+        updateVisuals(hsl);
+        AudioEngine.update(hsl);
+      });
+    }
 
     bindDualPair({
       minRange: cfgHueFreqMinRange, maxRange: cfgHueFreqMaxRange,

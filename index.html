@@ -156,6 +156,89 @@
         <h2 class="settings-title">Advanced Settings</h2>
 
         <details class="settings-group" open>
+          <summary>Sound Character</summary>
+
+          <div class="setting-row">
+            <label class="settings-label" for="cfgSoundCharacter">Instrument Preset</label>
+            <select id="cfgSoundCharacter" class="settings-select" aria-label="Instrument preset">
+              <option value="default" selected>Default</option>
+              <option value="piano">Piano</option>
+              <option value="strings">Strings</option>
+              <option value="organ">Organ</option>
+              <option value="flute">Flute</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="settings-label" for="cfgUpperNoiseType">Upper Noise Type</label>
+            <select id="cfgUpperNoiseType" class="settings-select">
+              <option value="pink" selected>Pink</option>
+              <option value="white">White</option>
+              <option value="brown">Brown</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="settings-label" for="cfgLowerNoiseType">Lower Noise Type</label>
+            <select id="cfgLowerNoiseType" class="settings-select">
+              <option value="brown" selected>Brown</option>
+              <option value="pink">Pink</option>
+              <option value="white">White</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="settings-label" for="cfgBellNoiseType">Bell Noise Type</label>
+            <select id="cfgBellNoiseType" class="settings-select">
+              <option value="pink" selected>Pink</option>
+              <option value="white">White</option>
+              <option value="brown">Brown</option>
+            </select>
+          </div>
+
+          <div class="dual-control">
+            <label class="settings-label">Noise Gain (Upper / Lower)</label>
+            <div class="dual-values">
+              <input type="number" id="cfgNoiseUpperMaxGainInput" min="0" max="1" step="0.01" value="0.5" aria-label="Maximum upper noise gain" />
+              <input type="number" id="cfgNoiseLowerMaxGainInput" min="0" max="1" step="0.01" value="0.35" aria-label="Maximum lower noise gain" />
+            </div>
+          </div>
+
+          <div class="dual-control">
+            <label class="settings-label">Bell Noise Boost</label>
+            <div class="dual-values">
+              <input type="number" id="cfgNoiseBellBoostInput" min="0" max="20" step="0.1" value="1.2" aria-label="Bell resonance noise boost" />
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label class="settings-label" for="cfgThereminWaveform">Theremin Waveform</label>
+            <select id="cfgThereminWaveform" class="settings-select">
+              <option value="sine" selected>Sine</option>
+              <option value="triangle">Triangle</option>
+              <option value="sawtooth">Sawtooth</option>
+              <option value="square">Square</option>
+            </select>
+          </div>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Theremin LFO Range (Rate Hz / Depth Ratio)</label>
+            <div class="dual-values">
+              <input type="number" id="cfgThereminLfoRateInput" min="0" max="20" step="0.1" value="5" aria-label="Theremin LFO rate" />
+              <input type="number" id="cfgThereminLfoDepthInput" min="0" max="0.1" step="0.001" value="0.012" aria-label="Theremin LFO depth ratio" />
+            </div>
+          </div>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Bell Timbre (Inharmonic Ratio / Brightness)</label>
+            <div class="dual-values">
+              <input type="number" id="cfgBellInharmonicInput" min="1" max="20" step="0.01" aria-label="Bell inharmonic ratio" />
+              <input type="number" id="cfgBellBrightnessInput" min="0" max="20" step="0.01" aria-label="Bell brightness" />
+            </div>
+          </div>
+        </details>
+
+        <details class="settings-group">
           <summary>Hue Mapping</summary>
 
           <div class="dual-control" data-dual-range>
@@ -259,78 +342,6 @@
             <div class="dual-values">
               <input type="number" id="cfgPinkNoiseStartInput" min="0" max="1" step="0.01" value="0.5" aria-label="Pink noise start" />
               <input type="number" id="cfgPinkNoiseEndInput" min="0" max="1" step="0.01" value="1" aria-label="Pink noise end" />
-            </div>
-          </div>
-        </details>
-
-        <details class="settings-group">
-          <summary>Sound Character</summary>
-
-          <div class="setting-row">
-            <label class="settings-label" for="cfgUpperNoiseType">Upper Noise Type</label>
-            <select id="cfgUpperNoiseType" class="settings-select">
-              <option value="pink" selected>Pink</option>
-              <option value="white">White</option>
-              <option value="brown">Brown</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <label class="settings-label" for="cfgLowerNoiseType">Lower Noise Type</label>
-            <select id="cfgLowerNoiseType" class="settings-select">
-              <option value="brown" selected>Brown</option>
-              <option value="pink">Pink</option>
-              <option value="white">White</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <label class="settings-label" for="cfgBellNoiseType">Bell Noise Type</label>
-            <select id="cfgBellNoiseType" class="settings-select">
-              <option value="pink" selected>Pink</option>
-              <option value="white">White</option>
-              <option value="brown">Brown</option>
-            </select>
-          </div>
-
-          <div class="dual-control">
-            <label class="settings-label">Noise Gain (Upper / Lower)</label>
-            <div class="dual-values">
-              <input type="number" id="cfgNoiseUpperMaxGainInput" min="0" max="1" step="0.01" value="0.5" aria-label="Maximum upper noise gain" />
-              <input type="number" id="cfgNoiseLowerMaxGainInput" min="0" max="1" step="0.01" value="0.35" aria-label="Maximum lower noise gain" />
-            </div>
-          </div>
-
-          <div class="dual-control">
-            <label class="settings-label">Bell Noise Boost</label>
-            <div class="dual-values">
-              <input type="number" id="cfgNoiseBellBoostInput" min="0" max="20" step="0.1" value="1.2" aria-label="Bell resonance noise boost" />
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <label class="settings-label" for="cfgThereminWaveform">Theremin Waveform</label>
-            <select id="cfgThereminWaveform" class="settings-select">
-              <option value="sine" selected>Sine</option>
-              <option value="triangle">Triangle</option>
-              <option value="sawtooth">Sawtooth</option>
-              <option value="square">Square</option>
-            </select>
-          </div>
-
-          <div class="dual-control" data-dual-range>
-            <label class="settings-label">Theremin LFO Range (Rate Hz / Depth Ratio)</label>
-            <div class="dual-values">
-              <input type="number" id="cfgThereminLfoRateInput" min="0" max="20" step="0.1" value="5" aria-label="Theremin LFO rate" />
-              <input type="number" id="cfgThereminLfoDepthInput" min="0" max="0.1" step="0.001" value="0.012" aria-label="Theremin LFO depth ratio" />
-            </div>
-          </div>
-
-          <div class="dual-control" data-dual-range>
-            <label class="settings-label">Bell Timbre (Inharmonic Ratio / Brightness)</label>
-            <div class="dual-values">
-              <input type="number" id="cfgBellInharmonicInput" min="1" max="20" step="0.01" aria-label="Bell inharmonic ratio" />
-              <input type="number" id="cfgBellBrightnessInput" min="0" max="20" step="0.01" aria-label="Bell brightness" />
             </div>
           </div>
         </details>
