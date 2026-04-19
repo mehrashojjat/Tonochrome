@@ -11,7 +11,7 @@
  * Mapping rules
  *  Hue  (0–360)  → Frequency  110–880 Hz  (logarithmic / octave-loop)
  *  Sat  (0–1)    → Noise gain  1.0–0    (inverted full range: grey=100% noise, vivid=silent)
- *  Lig  (0–1)    → Master vol  0–0.80    (linear power curve: dark=silent, bright=loud)
+ *  Lig  (0–1)    → Master vol  0–0.80 (0..50%), then Bell blend 0–100% (50..100%)
  *
  * The core mapping functions are pure (no DOM / Web Audio references)
  * so they can be reused in React Native or other environments.
@@ -112,7 +112,9 @@ function saturationToOscGain(saturation) {
 
 /**
  * Lightness → Master volume
- * Linear mapping: dark (L=0) is silent, bright (L=1) is loudest.
+ * Volume is controlled in the first half only:
+ *   L = 0..0.5 => vol = 0..MAX_VOL
+ *   L = 0.5..1 => vol = MAX_VOL
  * Uses a mild power curve for a more natural perceptual ramp.
  *
  *   L = 0   → vol = 0
@@ -123,7 +125,21 @@ function saturationToOscGain(saturation) {
  */
 function lightnessToVolume(lightness) {
   const MAX_VOL = 0.80;
-  return MAX_VOL * Math.pow(lightness, 0.7);
+  const t = Math.min(lightness / 0.5, 1);
+  return MAX_VOL * Math.pow(t, 0.7);
+}
+
+/**
+ * Lightness → Bell blend amount
+ *   L = 0..0.5 → 0
+ *   L = 0.5..1 → 0..1
+ *
+ * @param {number} lightness - 0..1
+ * @returns {number} bell blend 0..1
+ */
+function lightnessToBellBlend(lightness) {
+  if (lightness <= 0.5) return 0;
+  return Math.min((lightness - 0.5) / 0.5, 1);
 }
 
 /* Bell mode harmonic partials: ratio relative to fundamental and peak gain */
@@ -149,7 +165,7 @@ const AudioEngine = (() => {
   let noiseBuffer = null;
   let running = false;
   let muted = false;
-  let soundMode = 'synth'; // 'synth' | 'bell' | 'theremin'
+  let soundMode = 'theremin'; // 'synth' | 'bell' | 'theremin'
   let lastHSL = { hue: 0, saturation: 1, lightness: 0.5 };
   let harmonicOscs = [];
   let harmonicGains = []; // array of { node: GainNode, baseGain: number }
@@ -203,16 +219,62 @@ const AudioEngine = (() => {
   }
 
   /**
+   * Equal-power scale for the base voice as Bell blend increases.
+   * @param {number} lightness - 0..1
+   * @returns {number} scale 0..1
+   */
+  function bellBlendBaseScale(lightness) {
+    return Math.sqrt(1 - lightnessToBellBlend(lightness));
+  }
+
+  /**
+   * Equal-power scale for the Bell harmonic layer from Lightness.
+   * @param {number} lightness - 0..1
+   * @returns {number} scale 0..1
+   */
+  function bellBlendLayerScale(lightness) {
+    return Math.sqrt(lightnessToBellBlend(lightness));
+  }
+
+  /**
+   * Create and start Bell harmonic oscillators connected to masterGain.
+   * Also stores oscillator/gain references for realtime updates and teardown.
+   * @param {number} freq - fundamental frequency
+   * @param {number} gainScale - shared blend/saturation gain scale
+   */
+  function createBellHarmonics(freq, gainScale) {
+    BELL_HARMONICS.forEach((h) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq * h.ratio;
+
+      const g = ctx.createGain();
+      g.gain.value = h.gain * gainScale;
+
+      osc.connect(g);
+      g.connect(masterGain);
+      osc.start();
+
+      harmonicOscs.push(osc);
+      harmonicGains.push({ node: g, baseGain: h.gain });
+    });
+  }
+
+  /**
    * Build the audio graph.
    * Called once per play session.
    */
   function buildSynthGraph(hsl) {
     createNoiseBuffer();
+    const freq = hueToFrequency(hsl.hue);
+    const oscScale = saturationToOscGain(hsl.saturation);
+    const baseScale = bellBlendBaseScale(hsl.lightness);
+    const bellScale = bellBlendLayerScale(hsl.lightness);
 
     // Oscillator (sine — clean, neutral)
     oscillator = ctx.createOscillator();
     oscillator.type = "sine";
-    oscillator.frequency.value = hueToFrequency(hsl.hue);
+    oscillator.frequency.value = freq;
 
     // Noise source (looping buffer)
     noiseSource = ctx.createBufferSource();
@@ -221,7 +283,7 @@ const AudioEngine = (() => {
 
     // Gain nodes
     gainOsc = ctx.createGain();
-    gainOsc.gain.value = saturationToOscGain(hsl.saturation);
+    gainOsc.gain.value = oscScale * baseScale;
 
     gainNoise = ctx.createGain();
     gainNoise.gain.value = saturationToNoiseGain(hsl.saturation);
@@ -248,6 +310,9 @@ const AudioEngine = (() => {
     // Start sources
     oscillator.start();
     noiseSource.start();
+
+    // Bell harmonics layer blended in by Lightness upper half
+    createBellHarmonics(freq, oscScale * bellScale);
   }
 
   /**
@@ -285,21 +350,7 @@ const AudioEngine = (() => {
     compressor.connect(ctx.destination);
 
     // Additive harmonic oscillators — gain scaled by saturation
-    BELL_HARMONICS.forEach((h, i) => {
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = freq * h.ratio;
-
-      const g = ctx.createGain();
-      g.gain.value = h.gain * saturationToOscGain(hsl.saturation);
-
-      osc.connect(g);
-      g.connect(masterGain);
-      osc.start();
-
-      harmonicOscs.push(osc);
-      harmonicGains.push({ node: g, baseGain: h.gain });
-    });
+    createBellHarmonics(freq, saturationToOscGain(hsl.saturation));
 
     noiseSource.start();
   }
@@ -319,6 +370,9 @@ const AudioEngine = (() => {
     createNoiseBuffer();
 
     const freq = hueToFrequency(hsl.hue);
+    const oscScale = saturationToOscGain(hsl.saturation);
+    const baseScale = bellBlendBaseScale(hsl.lightness);
+    const bellScale = bellBlendLayerScale(hsl.lightness);
 
     // Main oscillator
     oscillator = ctx.createOscillator();
@@ -337,7 +391,7 @@ const AudioEngine = (() => {
     lfoGain.connect(oscillator.frequency);
 
     gainOsc = ctx.createGain();
-    gainOsc.gain.value = saturationToOscGain(hsl.saturation);
+    gainOsc.gain.value = oscScale * baseScale;
 
     // Noise source (same as Synth/Bell)
     noiseSource = ctx.createBufferSource();
@@ -367,6 +421,9 @@ const AudioEngine = (() => {
     oscillator.start();
     lfoOsc.start();
     noiseSource.start();
+
+    // Bell harmonics layer blended in by Lightness upper half
+    createBellHarmonics(freq, oscScale * bellScale);
   }
 
   /**
@@ -418,9 +475,16 @@ const AudioEngine = (() => {
   async function start(hsl) {
     if (running) return;
     await ensureContext();
-    buildGraph(hsl);
-    lastHSL = { ...hsl };
-    running = true;
+    try {
+      buildGraph(hsl);
+      lastHSL = { ...hsl };
+      running = true;
+    } catch (err) {
+      console.error('[AudioEngine] Failed to start:', err);
+      teardownGraph();
+      running = false;
+      throw err;
+    }
   }
 
   /**
@@ -465,6 +529,9 @@ const AudioEngine = (() => {
       }
     } else if (soundMode === 'theremin') {
       const freq = hueToFrequency(hsl.hue);
+      const oscScale = saturationToOscGain(hsl.saturation);
+      const baseScale = bellBlendBaseScale(hsl.lightness);
+      const bellScale = bellBlendLayerScale(hsl.lightness);
       if (oscillator) {
         oscillator.frequency.setTargetAtTime(freq, now, RAMP_TIME);
       }
@@ -476,18 +543,34 @@ const AudioEngine = (() => {
         gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
       }
       if (gainOsc) {
-        gainOsc.gain.setTargetAtTime(saturationToOscGain(hsl.saturation), now, RAMP_TIME);
+        gainOsc.gain.setTargetAtTime(oscScale * baseScale, now, RAMP_TIME);
       }
+      harmonicOscs.forEach((osc, i) => {
+        osc.frequency.setTargetAtTime(freq * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
+      });
+      harmonicGains.forEach(h => {
+        h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale, now, RAMP_TIME);
+      });
     } else {
+      const freq = hueToFrequency(hsl.hue);
+      const oscScale = saturationToOscGain(hsl.saturation);
+      const baseScale = bellBlendBaseScale(hsl.lightness);
+      const bellScale = bellBlendLayerScale(hsl.lightness);
       if (oscillator) {
-        oscillator.frequency.setTargetAtTime(hueToFrequency(hsl.hue), now, RAMP_TIME);
+        oscillator.frequency.setTargetAtTime(freq, now, RAMP_TIME);
       }
       if (gainNoise) {
         gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
       }
       if (gainOsc) {
-        gainOsc.gain.setTargetAtTime(saturationToOscGain(hsl.saturation), now, RAMP_TIME);
+        gainOsc.gain.setTargetAtTime(oscScale * baseScale, now, RAMP_TIME);
       }
+      harmonicOscs.forEach((osc, i) => {
+        osc.frequency.setTargetAtTime(freq * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
+      });
+      harmonicGains.forEach(h => {
+        h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale, now, RAMP_TIME);
+      });
     }
 
     if (masterGain) {
@@ -742,9 +825,6 @@ const UI = (() => {
   const noiseDisplay = document.getElementById("noiseDisplay");
   const volDisplay = document.getElementById("volDisplay");
 
-  const modeSynthBtn = document.getElementById("modeSynth");
-  const modeBellBtn = document.getElementById("modeBell");
-  const modeThereminBtn = document.getElementById("modeThermin");
   const satHint = document.getElementById("satHint");
 
   const cameraBtn = document.getElementById("cameraBtn");
@@ -822,16 +902,6 @@ const UI = (() => {
   }
 
   /**
-   * Sync mode button appearance and saturation hint to current mode.
-   */
-  function updateModeButtons(mode) {
-    modeSynthBtn.setAttribute("aria-pressed", String(mode === 'synth'));
-    modeBellBtn.setAttribute("aria-pressed", String(mode === 'bell'));
-    modeThereminBtn.setAttribute("aria-pressed", String(mode === 'theremin'));
-    satHint.textContent = 'Controls noise texture';
-  }
-
-  /**
    * Update camera overlay button, video visibility, and slider interactivity.
    * @param {boolean} active
    */
@@ -906,16 +976,6 @@ const UI = (() => {
   }
 
   /**
-   * Handle sound mode button click.
-   * Always updates mode buttons to reflect the actual resulting mode,
-   * so the UI stays consistent even if audio graph building fails.
-   */
-  async function onModeClick(mode) {
-    await AudioEngine.setMode(mode);
-    updateModeButtons(AudioEngine.soundMode);
-  }
-
-  /**
    * Handle any slider change.
    * Ignored while camera is active (camera is the sole source of truth).
    */
@@ -936,9 +996,13 @@ const UI = (() => {
       updateMuteBtn(false);
     } else {
       const hsl = getHSL();
-      await AudioEngine.start(hsl);
-      updatePlayBtn(true);
-      updateMuteBtn(AudioEngine.isMuted);
+      try {
+        await AudioEngine.start(hsl);
+      } catch (err) {
+        console.error('[UI] Play start failed:', err);
+      }
+      updatePlayBtn(AudioEngine.isRunning);
+      updateMuteBtn(AudioEngine.isRunning ? AudioEngine.isMuted : false);
     }
   }
 
@@ -972,7 +1036,6 @@ const UI = (() => {
     updateVisuals(hsl);
     updatePlayBtn(false);
     updateMuteBtn(false);
-    updateModeButtons('synth');
 
     hueSlider.addEventListener("input", onSliderChange);
     satSlider.addEventListener("input", onSliderChange);
@@ -980,10 +1043,6 @@ const UI = (() => {
 
     playBtn.addEventListener("click", onPlayClick);
     muteBtn.addEventListener("click", onMuteClick);
-
-    modeSynthBtn.addEventListener("click", () => onModeClick('synth'));
-    modeBellBtn.addEventListener("click", () => onModeClick('bell'));
-    modeThereminBtn.addEventListener("click", () => onModeClick('theremin'));
 
     cameraBtn.addEventListener("click", onCameraClick);
     flashBtn.addEventListener("click", onFlashClick);

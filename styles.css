@@ -380,16 +380,6 @@ body {
 }
 
 /* ---------- Sound mode selector ---------- */
-.sound-mode {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.btn-mode[aria-pressed="true"] {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-  color: var(--accent);
-}
 
 /* ---------- Mapping info ---------- */
 .mapping-info {

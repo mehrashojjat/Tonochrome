@@ -14,7 +14,7 @@ Tonochrome maps the three HSL channels to three acoustic dimensions:
 |---|---|---|---|
 | **Hue** (0–360°) | Frequency (pitch) | 110–880 Hz | Logarithmic / 3-octave |
 | **Saturation** (0–100%) | Noise blend | 100%→0% (inverted) | Square-root |
-| **Lightness** (0–100%) | Master volume | 0–80% | Power curve (0.7) |
+| **Lightness** (0–100%) | Volume + Bell blend | 0–80% (first half), then Bell 0–100% | Power + linear blend |
 
 ### Hue → Pitch
 
@@ -33,9 +33,12 @@ Saturation controls the balance between a **pure sine tone** and **pink noise**:
 
 The two channels are complementary (`√sat` and `√(1−sat)`), so the total perceived loudness stays constant as you sweep across the range.
 
-### Lightness → Volume
+### Lightness → Volume + Bell blend
 
-Lightness linearly controls the master gain with a mild power curve (`L^0.7`) for a more natural perceptual loudness ramp. Complete darkness is silence; full brightness is maximum volume (capped at 80% to protect hearing).
+Lightness now has two zones:
+
+- **0–50%**: controls master volume from silence up to maximum (capped at 80%) with a mild power curve for natural loudness.
+- **50–100%**: volume stays at maximum while the **Bell timbre blends in** from 0% to 100%.
 
 ---
 
@@ -43,7 +46,7 @@ Lightness linearly controls the master gain with a mild power curve (`L^0.7`) fo
 
 Tonochrome has three selectable sound modes, each with a distinct audio character. All three modes share the same HSL→audio mapping rules; only the synthesis method changes.
 
-### Synth (default)
+### Synth
 
 A pure sine wave mixed with pink noise. Simple, neutral, and great for exploring the HSL mapping.
 
@@ -70,7 +73,7 @@ Harmonic partials:
 | 2nd overtone | 3× | 0.20 |
 | 4th overtone (inharmonic) | 4.2× | 0.08 |
 
-### Theremin
+### Theremin (default)
 
 A sine oscillator with a slow LFO vibrato (~5 Hz) modulating its frequency, mixed with the same pink-noise path. This recreates the wavering, ethereal quality of a theremin. The LFO depth tracks the fundamental frequency (≈1.2% of pitch) so the vibrato intensity stays perceptually constant across the full hue range.
 
