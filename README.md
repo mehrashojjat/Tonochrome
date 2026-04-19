@@ -12,17 +12,36 @@ Tonochrome maps the three HSL channels to three acoustic dimensions:
 
 | HSL Channel | Audio Parameter | Range | Curve |
 |---|---|---|---|
-| **Hue** (0–360°) | Frequency (pitch) | 110–880 Hz | Logarithmic / 3-octave |
+| **Hue** (0–360°) | Frequency (pitch) | 110 Hz (red) → 880 Hz (purple), then 880→110 Hz blend (purple→red) | Logarithmic + equal-power crossfade |
 | **Saturation** (0–100%) | Noise blend | 100%→0% (inverted) | Square-root |
 | **Lightness** (0–100%) | Volume + Bell blend | 0–80% (first half), then Bell 0–100% | Power + linear blend |
 
 ### Hue → Pitch
 
-Hue is mapped logarithmically across three octaves (110–880 Hz) so that equal angular steps feel like equal pitch intervals. Hue 0° and 360° wrap to the same perceived pitch.
+Hue is split into two zones:
+
+**Zone A — 0° to 270° (red → purple):** Logarithmic ramp across three octaves. Equal angular steps feel like equal pitch intervals.
 
 ```
 freq = 110 × 2^(hue/360 × 3)
 ```
+
+| Hue | Colour | Frequency |
+|-----|--------|-----------|
+| 0° | Red | 110 Hz |
+| 90° | Yellow | ~220 Hz |
+| 180° | Cyan | ~440 Hz |
+| 270° | Purple | 880 Hz |
+
+**Zone B — 270° to 360° (purple → red):** The pitch stops rising. A second oscillator at 110 Hz fades in while the 880 Hz voice fades out — an **equal-power crossfade** (cosine/sine curve). The colour shift is purely a blend; no new note is introduced.
+
+```
+t = (hue − 270) / 90
+gain_880Hz = cos(t × π/2)
+gain_110Hz = sin(t × π/2)
+```
+
+At hue 360° only 110 Hz remains, so the circle closes seamlessly back to red/0°.
 
 ### Saturation → Noise blend
 

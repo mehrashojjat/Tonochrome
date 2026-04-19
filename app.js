@@ -50,24 +50,54 @@ function rgbToHsl(r, g, b) {
 }
 
 /**
- * Hue → Frequency
- * Logarithmic (exponential) mapping over one octave so that
- * hue 0° and 360° produce the same perceptual pitch (110 Hz).
+ * Hue → Frequency (primary) with purple-to-red blend
  *
- * Formula: freq = 110 * 2^(hue/360)
- * Range: 110 Hz (hue=0) → 220 Hz (hue=360, wraps back to 110)
- * We use a 3-octave span (110–880 Hz) by scaling:
- *   freq = 110 * 2^(hue/360 * 3)
- * This keeps the full circle within a 3-octave band while
- * ensuring 0° and 360° remain perceptually equivalent.
+ * Zone A — 0°–270° (red to purple):
+ *   Logarithmic 3-octave ramp, 110 Hz → 880 Hz.
+ *   freq = 110 × 2^(hue/360 × 3)
+ *
+ * Zone B — 270°–360° (purple to red):
+ *   The pitch no longer rises. Instead, a SECOND oscillator at 110 Hz
+ *   cross-fades with the 880 Hz primary using an equal-power curve:
+ *     t = (hue − 270) / 90   (0 at purple, 1 at red/360°)
+ *     gainA (880 Hz) = cos(t × π/2)
+ *     gainB (110 Hz) = sin(t × π/2)
+ *   At hue 270° only 880 Hz is heard; at hue 360° only 110 Hz is heard.
+ *
+ * Returns { freqA, gainA, freqB, gainB }.
+ * In zone A, freqB = 110 and gainB = 0 (second oscillator is silent).
  *
  * @param {number} hue - 0..360
- * @returns {number} frequency in Hz (110–880)
+ * @returns {{ freqA: number, gainA: number, freqB: number, gainB: number }}
+ */
+const HUE_BLEND_START = 270; // hue at which blend begins (purple = 880 Hz peak)
+const F_MIN = 110;
+const F_MAX = 880;
+
+function hueToFrequencyBlend(hue) {
+  if (hue <= HUE_BLEND_START) {
+    // Zone A: normal logarithmic ramp
+    const freq = F_MIN * Math.pow(2, (hue / 360) * 3);
+    return { freqA: freq, gainA: 1, freqB: F_MIN, gainB: 0 };
+  }
+  // Zone B: equal-power crossfade from 880 → 110
+  const t = (hue - HUE_BLEND_START) / (360 - HUE_BLEND_START);
+  const gainA = Math.cos(t * Math.PI / 2);
+  const gainB = Math.sin(t * Math.PI / 2);
+  return { freqA: F_MAX, gainA, freqB: F_MIN, gainB };
+}
+
+/**
+ * Hue → primary frequency (used for display / note-name purposes only).
+ * Returns the dominant perceived frequency at any hue.
+ *
+ * @param {number} hue - 0..360
+ * @returns {number} frequency in Hz
  */
 function hueToFrequency(hue) {
-  const OCTAVES = 3;
-  const F_MIN = 110;
-  return F_MIN * Math.pow(2, (hue / 360) * OCTAVES);
+  const { freqA, gainA, freqB, gainB } = hueToFrequencyBlend(hue);
+  // Return whichever partial is louder (useful for note-name label)
+  return gainA >= gainB ? freqA : freqB;
 }
 
 /**
@@ -172,8 +202,10 @@ const BELL_HARMONICS = [
 const AudioEngine = (() => {
   let ctx = null;
   let oscillator = null;
+  let oscillator2 = null;  // second oscillator for hue blend zone (purple → red)
   let noiseSource = null;
   let gainOsc = null;
+  let gainOsc2 = null;     // gain for oscillator2 blend
   let gainNoise = null;
   let masterGain = null;
   let compressor = null;
@@ -281,24 +313,31 @@ const AudioEngine = (() => {
    */
   function buildSynthGraph(hsl) {
     createNoiseBuffer();
-    const freq = hueToFrequency(hsl.hue);
+    const { freqA, gainA, freqB, gainB } = hueToFrequencyBlend(hsl.hue);
     const oscScale = saturationToOscGain(hsl.saturation);
     const baseScale = bellBlendBaseScale(hsl.lightness);
     const bellScale = bellBlendLayerScale(hsl.lightness);
 
-    // Oscillator (sine — clean, neutral)
+    // Primary oscillator
     oscillator = ctx.createOscillator();
     oscillator.type = "sine";
-    oscillator.frequency.value = freq;
+    oscillator.frequency.value = freqA;
+
+    gainOsc = ctx.createGain();
+    gainOsc.gain.value = oscScale * baseScale * gainA;
+
+    // Secondary oscillator — active only in hue blend zone (purple→red)
+    oscillator2 = ctx.createOscillator();
+    oscillator2.type = "sine";
+    oscillator2.frequency.value = freqB;
+
+    gainOsc2 = ctx.createGain();
+    gainOsc2.gain.value = oscScale * baseScale * gainB;
 
     // Noise source (looping buffer)
     noiseSource = ctx.createBufferSource();
     noiseSource.buffer = noiseBuffer;
     noiseSource.loop = true;
-
-    // Gain nodes
-    gainOsc = ctx.createGain();
-    gainOsc.gain.value = oscScale * baseScale;
 
     gainNoise = ctx.createGain();
     gainNoise.gain.value = saturationToNoiseGain(hsl.saturation);
@@ -316,18 +355,21 @@ const AudioEngine = (() => {
 
     // Connect graph
     oscillator.connect(gainOsc);
+    oscillator2.connect(gainOsc2);
     noiseSource.connect(gainNoise);
     gainOsc.connect(masterGain);
+    gainOsc2.connect(masterGain);
     gainNoise.connect(masterGain);
     masterGain.connect(compressor);
     compressor.connect(ctx.destination);
 
     // Start sources
     oscillator.start();
+    oscillator2.start();
     noiseSource.start();
 
     // Bell harmonics layer blended in by Lightness upper half
-    createBellHarmonics(freq, oscScale * bellScale);
+    createBellHarmonics(freqA, oscScale * bellScale * gainA);
   }
 
   /**
@@ -384,29 +426,37 @@ const AudioEngine = (() => {
   function buildThereminGraph(hsl) {
     createNoiseBuffer();
 
-    const freq = hueToFrequency(hsl.hue);
+    const { freqA, gainA, freqB, gainB } = hueToFrequencyBlend(hsl.hue);
     const oscScale = saturationToOscGain(hsl.saturation);
     const baseScale = bellBlendBaseScale(hsl.lightness);
     const bellScale = bellBlendLayerScale(hsl.lightness);
 
-    // Main oscillator
+    // Main oscillator (with LFO vibrato)
     oscillator = ctx.createOscillator();
     oscillator.type = 'sine';
-    oscillator.frequency.value = freq;
+    oscillator.frequency.value = freqA;
 
-    // Vibrato LFO — modulates oscillator frequency
+    // Vibrato LFO — modulates primary oscillator frequency
     lfoOsc = ctx.createOscillator();
     lfoOsc.type = 'sine';
     lfoOsc.frequency.value = 5; // 5 Hz vibrato rate
 
     lfoGain = ctx.createGain();
-    lfoGain.gain.value = freq * 0.012; // ~1.2% of fundamental = subtle vibrato depth
+    lfoGain.gain.value = freqA * 0.012; // ~1.2% of fundamental
 
     lfoOsc.connect(lfoGain);
     lfoGain.connect(oscillator.frequency);
 
     gainOsc = ctx.createGain();
-    gainOsc.gain.value = oscScale * baseScale;
+    gainOsc.gain.value = oscScale * baseScale * gainA;
+
+    // Secondary oscillator for hue blend zone — no LFO (stationary 110 Hz tone)
+    oscillator2 = ctx.createOscillator();
+    oscillator2.type = 'sine';
+    oscillator2.frequency.value = freqB;
+
+    gainOsc2 = ctx.createGain();
+    gainOsc2.gain.value = oscScale * baseScale * gainB;
 
     // Noise source (same as Synth/Bell)
     noiseSource = ctx.createBufferSource();
@@ -427,18 +477,21 @@ const AudioEngine = (() => {
     compressor.release.value = 0.15;
 
     oscillator.connect(gainOsc);
+    oscillator2.connect(gainOsc2);
     noiseSource.connect(gainNoise);
     gainOsc.connect(masterGain);
+    gainOsc2.connect(masterGain);
     gainNoise.connect(masterGain);
     masterGain.connect(compressor);
     compressor.connect(ctx.destination);
 
     oscillator.start();
+    oscillator2.start();
     lfoOsc.start();
     noiseSource.start();
 
     // Bell harmonics layer blended in by Lightness upper half
-    createBellHarmonics(freq, oscScale * bellScale);
+    createBellHarmonics(freqA, oscScale * bellScale * gainA);
   }
 
   /**
@@ -463,12 +516,18 @@ const AudioEngine = (() => {
       oscillator.disconnect();
       oscillator = null;
     }
+    if (oscillator2) {
+      try { oscillator2.stop(); } catch (_) {}
+      oscillator2.disconnect();
+      oscillator2 = null;
+    }
     if (noiseSource) {
       try { noiseSource.stop(); } catch (_) {}
       noiseSource.disconnect();
       noiseSource = null;
     }
-    if (gainOsc) { gainOsc.disconnect(); gainOsc = null; }
+    if (gainOsc)  { gainOsc.disconnect();  gainOsc = null; }
+    if (gainOsc2) { gainOsc2.disconnect(); gainOsc2 = null; }
     if (gainNoise) { gainNoise.disconnect(); gainNoise = null; }
     if (lfoOsc) { try { lfoOsc.stop(); } catch (_) {} lfoOsc.disconnect(); lfoOsc = null; }
     if (lfoGain) { lfoGain.disconnect(); lfoGain = null; }
@@ -543,48 +602,61 @@ const AudioEngine = (() => {
         gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
       }
     } else if (soundMode === 'theremin') {
-      const freq = hueToFrequency(hsl.hue);
+      const { freqA, gainA, freqB, gainB } = hueToFrequencyBlend(hsl.hue);
       const oscScale = saturationToOscGain(hsl.saturation);
       const baseScale = bellBlendBaseScale(hsl.lightness);
       const bellScale = bellBlendLayerScale(hsl.lightness);
       if (oscillator) {
-        oscillator.frequency.setTargetAtTime(freq, now, RAMP_TIME);
+        oscillator.frequency.setTargetAtTime(freqA, now, RAMP_TIME);
       }
-      // Update LFO vibrato depth to track the new fundamental frequency
+      if (oscillator2) {
+        oscillator2.frequency.setTargetAtTime(freqB, now, RAMP_TIME);
+      }
+      // LFO depth tracks the primary frequency
       if (lfoGain) {
-        lfoGain.gain.setTargetAtTime(freq * 0.012, now, RAMP_TIME);
+        lfoGain.gain.setTargetAtTime(freqA * 0.012, now, RAMP_TIME);
+      }
+      if (gainOsc) {
+        gainOsc.gain.setTargetAtTime(oscScale * baseScale * gainA, now, RAMP_TIME);
+      }
+      if (gainOsc2) {
+        gainOsc2.gain.setTargetAtTime(oscScale * baseScale * gainB, now, RAMP_TIME);
       }
       if (gainNoise) {
         gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
       }
-      if (gainOsc) {
-        gainOsc.gain.setTargetAtTime(oscScale * baseScale, now, RAMP_TIME);
-      }
       harmonicOscs.forEach((osc, i) => {
-        osc.frequency.setTargetAtTime(freq * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
+        osc.frequency.setTargetAtTime(freqA * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
       });
       harmonicGains.forEach(h => {
-        h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale, now, RAMP_TIME);
+        h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale * gainA, now, RAMP_TIME);
       });
     } else {
-      const freq = hueToFrequency(hsl.hue);
+      // synth mode
+      const { freqA, gainA, freqB, gainB } = hueToFrequencyBlend(hsl.hue);
       const oscScale = saturationToOscGain(hsl.saturation);
       const baseScale = bellBlendBaseScale(hsl.lightness);
       const bellScale = bellBlendLayerScale(hsl.lightness);
       if (oscillator) {
-        oscillator.frequency.setTargetAtTime(freq, now, RAMP_TIME);
+        oscillator.frequency.setTargetAtTime(freqA, now, RAMP_TIME);
+      }
+      if (oscillator2) {
+        oscillator2.frequency.setTargetAtTime(freqB, now, RAMP_TIME);
+      }
+      if (gainOsc) {
+        gainOsc.gain.setTargetAtTime(oscScale * baseScale * gainA, now, RAMP_TIME);
+      }
+      if (gainOsc2) {
+        gainOsc2.gain.setTargetAtTime(oscScale * baseScale * gainB, now, RAMP_TIME);
       }
       if (gainNoise) {
         gainNoise.gain.setTargetAtTime(saturationToNoiseGain(hsl.saturation), now, RAMP_TIME);
       }
-      if (gainOsc) {
-        gainOsc.gain.setTargetAtTime(oscScale * baseScale, now, RAMP_TIME);
-      }
       harmonicOscs.forEach((osc, i) => {
-        osc.frequency.setTargetAtTime(freq * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
+        osc.frequency.setTargetAtTime(freqA * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
       });
       harmonicGains.forEach(h => {
-        h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale, now, RAMP_TIME);
+        h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale * gainA, now, RAMP_TIME);
       });
     }
 
