@@ -12,9 +12,9 @@ Tonochrome maps the three HSL channels to three acoustic dimensions:
 
 | HSL Channel | Audio Parameter | Range | Curve |
 |---|---|---|---|
-| **Hue** (0–360°) | Frequency (pitch) | 110 Hz (red) → 880 Hz (purple), then 880→110 Hz blend (purple→red) | Logarithmic + equal-power crossfade |
-| **Saturation** (0–100%) | Noise blend | 100%→0% (inverted) | Square-root |
-| **Lightness** (0–100%) | Volume + Bell blend | 0–80% (first half), then Bell 0–100% | Power + linear blend |
+| **Hue** (0–360°) | Frequency (pitch) | 110 Hz (red) → 880 Hz (purple), then 880→110 Hz blend (purple→red) | Logarithmic + linear complementary crossfade |
+| **Saturation** (0–100%) | Noise blend | 100%→0% (inverted) | Linear |
+| **Lightness** (0–100%) | Volume + Bell blend | 0–80% (first half), then Bell 0–100% | Linear + linear blend |
 
 ### Hue → Pitch
 
@@ -23,7 +23,7 @@ Hue is split into two zones:
 **Zone A — 0° to 270° (red → purple):** Logarithmic ramp across three octaves. Equal angular steps feel like equal pitch intervals.
 
 ```
-freq = 110 × 2^(hue/360 × 3)
+freq = 110 × 2^(hue/270 × 3)
 ```
 
 | Hue | Colour | Frequency |
@@ -33,12 +33,12 @@ freq = 110 × 2^(hue/360 × 3)
 | 180° | Cyan | ~440 Hz |
 | 270° | Purple | 880 Hz |
 
-**Zone B — 270° to 360° (purple → red):** The pitch stops rising. A second oscillator at 110 Hz fades in while the 880 Hz voice fades out — an **equal-power crossfade** (cosine/sine curve). The colour shift is purely a blend; no new note is introduced.
+**Zone B — 270° to 360° (purple → red):** The pitch stops rising. A second oscillator at 110 Hz fades in while the 880 Hz voice fades out — a **linear complementary crossfade**. The colour shift is purely a blend; no new note is introduced.
 
 ```
 t = (hue − 270) / 90
-gain_880Hz = cos(t × π/2)
-gain_110Hz = sin(t × π/2)
+gain_880Hz = 1 − t
+gain_110Hz = t
 ```
 
 At hue 360° only 110 Hz remains, so the circle closes seamlessly back to red/0°.
@@ -50,14 +50,14 @@ Saturation controls the balance between a **pure sine tone** and **pink noise**:
 - Saturation **0%** (grey) → **100% noise**, 0% tone — you hear only textured noise
 - Saturation **100%** (vivid) → **0% noise**, 100% tone — you hear a clean sine wave
 
-The two channels are complementary (`√sat` and `√(1−sat)`), so the total perceived loudness stays constant as you sweep across the range.
+The two channels are complementary and linear in the active range (`sat/NOISE_CEIL` and `1−sat/NOISE_CEIL`).
 
 ### Lightness → Volume + Bell blend
 
 Lightness has two zones, and the behaviour applies in **Synth and Theremin modes** (in Bell mode harmonics always play at full strength):
 
-- **0–50%**: controls master volume from silence up to maximum (capped at 80%) with a mild power curve for natural loudness.
-- **50–100%**: volume stays at maximum while **Bell harmonics blend in** from 0% to 100% using an **equal-power crossfade** (square-root curve). As the colour becomes brighter, the sound grows richer — a warm, piano-like harmonic layer fades in on top of the base voice. At L = 100% the base voice and the bell layer sit at equal perceived loudness (each at √0.5 ≈ 71% gain).
+- **0–50%**: controls master volume from silence up to maximum (capped at 80%) with a linear ramp.
+- **50–100%**: volume stays at maximum while **Bell harmonics blend in** from 0% to 100% using a linear complementary blend (`base = 1−blend`, `bell = blend`). As the colour becomes brighter, the sound grows richer — a warm, piano-like harmonic layer fades in on top of the base voice.
 
 This bell enrichment applies to **every component of the current hue sound** — including both sides of the purple→red crossfade. If the hue slider is in the 270°–360° blend zone, the 880 Hz voice gains its own bell harmonic layer (scaled by `gainA`) and the 110 Hz voice gains its own independent bell harmonic layer (scaled by `gainB`). The result is that the L slider's tonal effect is always consistent with whatever pitch blend the H slider is producing.
 

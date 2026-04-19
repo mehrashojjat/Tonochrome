@@ -54,14 +54,14 @@ function rgbToHsl(r, g, b) {
  *
  * Zone A — 0°–270° (red to purple):
  *   Logarithmic 3-octave ramp, 110 Hz → 880 Hz.
- *   freq = 110 × 2^(hue/360 × 3)
+ *   freq = 110 × 2^(hue/270 × 3)
  *
  * Zone B — 270°–360° (purple to red):
  *   The pitch no longer rises. Instead, a SECOND oscillator at 110 Hz
- *   cross-fades with the 880 Hz primary using an equal-power curve:
+ *   cross-fades with the 880 Hz primary using a linear complementary curve:
  *     t = (hue − 270) / 90   (0 at purple, 1 at red/360°)
- *     gainA (880 Hz) = cos(t × π/2)
- *     gainB (110 Hz) = sin(t × π/2)
+ *     gainA (880 Hz) = 1 − t
+ *     gainB (110 Hz) = t
  *   At hue 270° only 880 Hz is heard; at hue 360° only 110 Hz is heard.
  *
  * Returns { freqA, gainA, freqB, gainB }.
@@ -77,13 +77,13 @@ const F_MAX = 880;
 function hueToFrequencyBlend(hue) {
   if (hue <= HUE_BLEND_START) {
     // Zone A: normal logarithmic ramp
-    const freq = F_MIN * Math.pow(2, (hue / 360) * 3);
+    const freq = F_MIN * Math.pow(2, (hue / HUE_BLEND_START) * 3);
     return { freqA: freq, gainA: 1, freqB: F_MIN, gainB: 0 };
   }
-  // Zone B: equal-power crossfade from 880 → 110
+  // Zone B: linear complementary crossfade from 880 → 110
   const t = (hue - HUE_BLEND_START) / (360 - HUE_BLEND_START);
-  const gainA = Math.cos(t * Math.PI / 2);
-  const gainB = Math.sin(t * Math.PI / 2);
+  const gainA = 1 - t;
+  const gainB = t;
   return { freqA: F_MAX, gainA, freqB: F_MIN, gainB };
 }
 
@@ -118,9 +118,9 @@ const NOISE_MAX  = 0.50;   // maximum noise gain (50% blend)
 
 function saturationToNoiseGain(saturation) {
   if (saturation >= NOISE_CEIL) return 0;
-  // normalise to 0..1 within the active range, then invert with sqrt curve
+  // normalise to 0..1 within the active range, then invert linearly
   const t = saturation / NOISE_CEIL;
-  return NOISE_MAX * Math.sqrt(1 - t);
+  return NOISE_MAX * (1 - t);
 }
 
 /**
@@ -137,7 +137,7 @@ function saturationToNoiseGain(saturation) {
  */
 function saturationToOscGain(saturation) {
   const t = Math.min(saturation / NOISE_CEIL, 1);
-  return Math.sqrt(t);
+  return t;
 }
 
 /**
@@ -145,7 +145,7 @@ function saturationToOscGain(saturation) {
  * Volume is controlled in the first half only:
  *   L = 0..0.5 => vol = 0..MAX_VOL
  *   L = 0.5..1 => vol = MAX_VOL
- * Uses a mild power curve for a more natural perceptual ramp.
+ * Uses a linear ramp for an even response.
  *
  *   L = 0   → vol = 0
  *   L = 1   → vol = MAX_VOL (0.80)
@@ -156,7 +156,7 @@ function saturationToOscGain(saturation) {
 function lightnessToVolume(lightness) {
   const MAX_VOL = 0.80;
   const t = Math.min(lightness / 0.5, 1);
-  return MAX_VOL * Math.pow(t, 0.7);
+  return MAX_VOL * t;
 }
 
 /**
@@ -268,21 +268,21 @@ const AudioEngine = (() => {
   }
 
   /**
-   * Equal-power scale for the base voice as Bell blend increases.
+   * Linear scale for the base voice as Bell blend increases.
    * @param {number} lightness - 0..1
    * @returns {number} scale 0..1
    */
   function bellBlendBaseScale(lightness) {
-    return Math.sqrt(1 - lightnessToBellBlend(lightness));
+    return 1 - lightnessToBellBlend(lightness);
   }
 
   /**
-   * Equal-power scale for the Bell harmonic layer from Lightness.
+   * Linear scale for the Bell harmonic layer from Lightness.
    * @param {number} lightness - 0..1
    * @returns {number} scale 0..1
    */
   function bellBlendLayerScale(lightness) {
-    return Math.sqrt(lightnessToBellBlend(lightness));
+    return lightnessToBellBlend(lightness);
   }
 
   /**
