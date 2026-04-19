@@ -215,7 +215,9 @@ const AudioEngine = (() => {
   let soundMode = 'theremin'; // 'synth' | 'bell' | 'theremin'
   let lastHSL = { hue: 0, saturation: 1, lightness: 0.5 };
   let harmonicOscs = [];
-  let harmonicGains = []; // array of { node: GainNode, baseGain: number }
+  let harmonicGains = [];  // bell layer for primary voice (freqA)
+  let harmonicOscsB = [];
+  let harmonicGainsB = []; // bell layer for blend voice (freqB, hue 270°–360°)
   let lfoOsc = null;  // Theremin vibrato LFO oscillator
   let lfoGain = null; // Theremin vibrato depth gain
 
@@ -289,22 +291,29 @@ const AudioEngine = (() => {
    * @param {number} freq - fundamental frequency
    * @param {number} gainScale - shared blend/saturation gain scale
    */
-  function createBellHarmonics(freq, gainScale) {
+  function _buildBellHarmonicsInto(freq, gainScale, oscArr, gainArr) {
     BELL_HARMONICS.forEach((h) => {
       const osc = ctx.createOscillator();
       osc.type = 'sine';
       osc.frequency.value = freq * h.ratio;
-
       const g = ctx.createGain();
       g.gain.value = h.gain * gainScale;
-
       osc.connect(g);
       g.connect(masterGain);
       osc.start();
-
-      harmonicOscs.push(osc);
-      harmonicGains.push({ node: g, baseGain: h.gain });
+      oscArr.push(osc);
+      gainArr.push({ node: g, baseGain: h.gain });
     });
+  }
+
+  // Bell harmonics for the primary (freqA) voice
+  function createBellHarmonics(freq, gainScale) {
+    _buildBellHarmonicsInto(freq, gainScale, harmonicOscs, harmonicGains);
+  }
+
+  // Bell harmonics for the blend (freqB) voice in the hue 270°–360° zone
+  function createBellHarmonicsB(freq, gainScale) {
+    _buildBellHarmonicsInto(freq, gainScale, harmonicOscsB, harmonicGainsB);
   }
 
   /**
@@ -368,8 +377,9 @@ const AudioEngine = (() => {
     oscillator2.start();
     noiseSource.start();
 
-    // Bell harmonics layer blended in by Lightness upper half
+    // Bell harmonics for primary voice (freqA) and blend voice (freqB)
     createBellHarmonics(freqA, oscScale * bellScale * gainA);
+    createBellHarmonicsB(freqB, oscScale * bellScale * gainB);
   }
 
   /**
@@ -490,8 +500,9 @@ const AudioEngine = (() => {
     lfoOsc.start();
     noiseSource.start();
 
-    // Bell harmonics layer blended in by Lightness upper half
+    // Bell harmonics for primary voice (freqA) and blend voice (freqB)
     createBellHarmonics(freqA, oscScale * bellScale * gainA);
+    createBellHarmonicsB(freqB, oscScale * bellScale * gainB);
   }
 
   /**
@@ -539,6 +550,12 @@ const AudioEngine = (() => {
     });
     harmonicOscs = [];
     harmonicGains = [];
+    harmonicOscsB.forEach(osc => {
+      try { osc.stop(); } catch (_) {}
+      osc.disconnect();
+    });
+    harmonicOscsB = [];
+    harmonicGainsB = [];
   }
 
   /**
@@ -631,6 +648,12 @@ const AudioEngine = (() => {
       harmonicGains.forEach(h => {
         h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale * gainA, now, RAMP_TIME);
       });
+      harmonicOscsB.forEach((osc, i) => {
+        osc.frequency.setTargetAtTime(freqB * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
+      });
+      harmonicGainsB.forEach(h => {
+        h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale * gainB, now, RAMP_TIME);
+      });
     } else {
       // synth mode
       const { freqA, gainA, freqB, gainB } = hueToFrequencyBlend(hsl.hue);
@@ -657,6 +680,12 @@ const AudioEngine = (() => {
       });
       harmonicGains.forEach(h => {
         h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale * gainA, now, RAMP_TIME);
+      });
+      harmonicOscsB.forEach((osc, i) => {
+        osc.frequency.setTargetAtTime(freqB * BELL_HARMONICS[i].ratio, now, RAMP_TIME);
+      });
+      harmonicGainsB.forEach(h => {
+        h.node.gain.setTargetAtTime(h.baseGain * oscScale * bellScale * gainB, now, RAMP_TIME);
       });
     }
 

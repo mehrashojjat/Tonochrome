@@ -59,6 +59,8 @@ Lightness has two zones, and the behaviour applies in **Synth and Theremin modes
 - **0–50%**: controls master volume from silence up to maximum (capped at 80%) with a mild power curve for natural loudness.
 - **50–100%**: volume stays at maximum while **Bell harmonics blend in** from 0% to 100% using an **equal-power crossfade** (square-root curve). As the colour becomes brighter, the sound grows richer — a warm, piano-like harmonic layer fades in on top of the base voice. At L = 100% the base voice and the bell layer sit at equal perceived loudness (each at √0.5 ≈ 71% gain).
 
+This bell enrichment applies to **every component of the current hue sound** — including both sides of the purple→red crossfade. If the hue slider is in the 270°–360° blend zone, the 880 Hz voice gains its own bell harmonic layer (scaled by `gainA`) and the 110 Hz voice gains its own independent bell harmonic layer (scaled by `gainB`). The result is that the L slider's tonal effect is always consistent with whatever pitch blend the H slider is producing.
+
 In **Bell mode** Lightness only controls volume (0–50% zone); the harmonic layer always runs at full strength regardless of Lightness.
 
 ---
@@ -69,12 +71,15 @@ Tonochrome has three selectable sound modes, each with a distinct audio characte
 
 ### Synth
 
-A pure sine wave mixed with pink noise. Simple, neutral, and great for exploring the HSL mapping.
+Two sine oscillators mixed with pink noise. Simple and neutral. In hue zone A (0°–270°) only the primary oscillator is audible; in zone B (270°–360°) a second oscillator at 110 Hz cross-fades in as the first fades toward silence.
 
 ```
-OscillatorNode (sine)         ──► gainOsc   ──┐
+OscillatorNode  (freqA) ──► gainOsc  ──┐
+OscillatorNode2 (freqB) ──► gainOsc2 ──┤
 AudioBufferSourceNode (noise) ──► gainNoise ──┤──► masterGain ──► DynamicsCompressor ──► destination
 ```
+
+When L > 50%, a bell harmonic layer (4 partials) is added for **each** oscillator, scaled by its crossfade gain so the tonal enrichment tracks the hue blend continuously.
 
 ### Bell
 
@@ -96,13 +101,16 @@ Harmonic partials:
 
 ### Theremin (default)
 
-A sine oscillator with a slow LFO vibrato (~5 Hz) modulating its frequency, mixed with the same pink-noise path. This recreates the wavering, ethereal quality of a theremin. The LFO depth tracks the fundamental frequency (≈1.2% of pitch) so the vibrato intensity stays perceptually constant across the full hue range.
+Like Synth but the primary oscillator is modulated by a slow LFO vibrato (~5 Hz), recreating the wavering, ethereal quality of a theremin. The LFO depth tracks the primary frequency (≈1.2% of pitch) so vibrato intensity stays perceptually constant across the hue range. The secondary 110 Hz blend oscillator is a steady sine (no LFO) — its stillness creates a subtle anchoring contrast when the hue is in the purple→red zone.
 
 ```
-lfoOsc (sine, 5 Hz) ──► lfoGain (depth ≈ 1.2% of freq) ──► oscillator.frequency
-OscillatorNode (sine) ──► gainOsc   ──┐
-AudioBufferSourceNode (noise) ──► gainNoise ──┤──► masterGain ──► DynamicsCompressor ──► destination
+lfoOsc (sine, 5 Hz) ──► lfoGain (depth ≈ 1.2% of freqA) ──► oscillator.frequency
+OscillatorNode  (freqA, vibrato) ──► gainOsc  ──┐
+OscillatorNode2 (freqB, steady)  ──► gainOsc2 ──┤
+AudioBufferSourceNode (noise) ──► gainNoise    ──┤──► masterGain ──► DynamicsCompressor ──► destination
 ```
+
+As with Synth, when L > 50% a bell harmonic layer is added per oscillator, gated by each voice's crossfade gain.
 
 ---
 
@@ -128,8 +136,7 @@ Common nodes across all modes:
 | **Hue slider** | 0–360°, rendered over a full-spectrum gradient |
 | **Saturation slider** | 0–100%, rendered over a grey→vivid gradient |
 | **Lightness slider** | 0–100%, rendered over a black→grey→white gradient |
-| **Synth / Bell / Theremin** | Sound mode selector — switches the synthesis method in real time |
-| **Play / Stop** | Starts or stops the audio engine |
+| **Play / Stop** | Starts or stops the audio engine (default mode: Theremin) |
 | **Mute / Unmute** | Silences audio without stopping the engine |
 | **Info panel** | Live readout: Note name, Frequency (Hz), Noise blend (%), Volume (%) |
 
@@ -163,11 +170,11 @@ Tonochrome/
 
 ### `app.js` modules
 
-- **Section 1 — Audio mapping** (pure functions, no browser dependencies): `hueToFrequency`, `saturationToNoiseGain`, `saturationToOscGain`, `lightnessToVolume`, `lightnessToBellBlend`, `frequencyToNoteName`
+- **Section 1 — Audio mapping** (pure functions, no browser dependencies): `hueToFrequencyBlend`, `hueToFrequency`, `saturationToNoiseGain`, `saturationToOscGain`, `lightnessToVolume`, `lightnessToBellBlend`, `frequencyToNoteName`
 - **Section 2 — AudioEngine** (IIFE): manages the Web Audio graph, exposes `start`, `stop`, `update`, `setMute`, `setMode`
-  - `buildSynthGraph` — sine oscillator + pink noise
+  - `buildSynthGraph` — dual sine oscillators (hue blend) + optional dual bell harmonics (L > 50%) + pink noise
   - `buildBellGraph` — additive harmonic synthesis + pink noise
-  - `buildThereminGraph` — sine oscillator with LFO vibrato + pink noise
+  - `buildThereminGraph` — primary oscillator with LFO vibrato + steady secondary oscillator (hue blend) + optional dual bell harmonics + pink noise
 - **Section 3 — UI** (IIFE): reads sliders, updates visuals, wires DOM events
 - **Section 4 — Bootstrap**: `DOMContentLoaded` entry point
 
@@ -193,11 +200,11 @@ Tonochrome is designed to be fully usable by blind and disabled users. The audio
 ### Screen Reader Support
 
 - **Skip link** — a visually hidden "Skip to main content" link becomes visible on focus, letting keyboard users bypass the header.
-- **ARIA live regions** — two regions (polite and assertive) announce playback events:
-  - When Play is pressed: *"Playing. A4, Theremin mode."*
+- **ARIA live region** — a polite live region announces playback events:
+  - When Play is pressed: *"Playing. A4."*
   - When Stop is pressed: *"Stopped."*
   - When Mute / Unmute is pressed: *"Muted."* / *"Unmuted."*
-  - When a sound mode is selected: *"Bell mode."*
+  - When a mode is switched via keyboard shortcut: *"Bell mode."*
 - **Note name display** — the info panel shows both the frequency in Hz and the musical note name (e.g. *A4*, *C3*) for any hue position.
 - **`aria-valuetext` on all sliders** — as you drag, the screen reader reads a meaningful description instead of a bare number:
 
@@ -207,7 +214,6 @@ Tonochrome is designed to be fully usable by blind and disabled users. The audio
   | Saturation | *"30% — 18% noise blend"* / *"0% — pure noise, no tone"* / *"100% — pure tone, no noise"* |
   | Lightness | *"75% — full volume, bell blend 50%"* / *"30% — volume 57%"* |
 
-- **Sound Mode selector** uses `role="radiogroup"` / `role="radio"` with `aria-checked` state so screen readers announce the active mode correctly.
 - All buttons use `aria-pressed` to reflect toggle state (Play/Stop, Mute/Unmute, Camera, Flash).
 - The keyboard shortcuts reference is provided as a screen-reader-only `<p>` linked to the main landmark via `aria-describedby`.
 
@@ -220,14 +226,13 @@ All functionality is reachable without a mouse or touch screen:
 | **Tab / Shift-Tab** | Move focus between all interactive controls |
 | **Space / Enter** | Activate the focused button or slider |
 | **← → ↑ ↓** on sliders | Adjust slider value (native range behaviour) |
-| **← → ↑ ↓** on Sound Mode | Navigate between Synth / Bell / Theremin and activate |
 | **Space** *(no focus on button/input)* | Play / Stop |
 | **M** *(no focus on button/input)* | Mute / Unmute |
 | **1** | Switch to Synth mode |
 | **2** | Switch to Bell mode |
 | **3** | Switch to Theremin mode |
 
-The Sound Mode selector follows the WAI-ARIA radiogroup keyboard pattern: arrow keys both move focus and activate the new mode. Only the active mode button is in the Tab order; the others are skipped and reached via arrows.
+The sound mode is not shown in the UI — Theremin is the default. Power users can switch modes silently at any time using the 1 / 2 / 3 keys; the live region announces the change.
 
 ### Focus Visibility
 
