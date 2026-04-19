@@ -412,6 +412,105 @@ body {
   font-weight: 600;
 }
 
+/* ---------- Advanced settings ---------- */
+.settings-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.settings-title {
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.settings-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  padding: 0.7rem;
+}
+
+.settings-group > summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  margin-bottom: 0.75rem;
+}
+
+.settings-group[open] > summary {
+  color: var(--accent);
+}
+
+.setting-row,
+.dual-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+
+.settings-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.dual-track-wrap {
+  position: relative;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: #0f0f0f;
+  overflow: hidden;
+}
+
+.dual-slider {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dual-slider::-webkit-slider-thumb {
+  pointer-events: auto;
+}
+
+.dual-slider::-moz-range-thumb {
+  pointer-events: auto;
+}
+
+.dual-values {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.dual-values input,
+.settings-select {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #111;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 0.75rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.settings-select {
+  cursor: pointer;
+}
+
 /* Slider visual feedback when camera is active (read-only) */
 .slider:disabled {
   opacity: 0.45;

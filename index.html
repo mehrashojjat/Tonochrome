@@ -152,6 +152,157 @@
         </dl>
       </section>
 
+      <section class="settings-panel" aria-label="Advanced sound mapping settings">
+        <h2 class="settings-title">Advanced Settings</h2>
+
+        <details class="settings-group" open>
+          <summary>Hue Mapping</summary>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">0–Blend Start Frequency Range (Hz)</label>
+            <div class="dual-track-wrap">
+              <input type="range" id="cfgHueFreqMinRange" class="slider dual-slider" min="40" max="2000" step="1" value="110" />
+              <input type="range" id="cfgHueFreqMaxRange" class="slider dual-slider" min="40" max="2000" step="1" value="880" />
+            </div>
+            <div class="dual-values">
+              <input type="number" id="cfgHueFreqMinInput" min="40" max="2000" step="1" value="110" aria-label="Hue base frequency minimum" />
+              <input type="number" id="cfgHueFreqMaxInput" min="40" max="2000" step="1" value="880" aria-label="Hue base frequency maximum" />
+            </div>
+          </div>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Blend Region on Hue Slider (°)</label>
+            <div class="dual-track-wrap">
+              <input type="range" id="cfgHueBlendStartRange" class="slider dual-slider" min="0" max="360" step="1" value="270" />
+              <input type="range" id="cfgHueBlendEndRange" class="slider dual-slider" min="0" max="360" step="1" value="360" />
+            </div>
+            <div class="dual-values">
+              <input type="number" id="cfgHueBlendStartInput" min="0" max="360" step="1" value="270" aria-label="Hue blend start" />
+              <input type="number" id="cfgHueBlendEndInput" min="0" max="360" step="1" value="360" aria-label="Hue blend end" />
+            </div>
+          </div>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Blend Frequencies (Hz, High/Low)</label>
+            <div class="dual-track-wrap">
+              <input type="range" id="cfgHueBlendLowFreqRange" class="slider dual-slider" min="40" max="2000" step="1" value="110" />
+              <input type="range" id="cfgHueBlendHighFreqRange" class="slider dual-slider" min="40" max="2000" step="1" value="880" />
+            </div>
+            <div class="dual-values">
+              <input type="number" id="cfgHueBlendLowFreqInput" min="40" max="2000" step="1" value="110" aria-label="Blend low frequency" />
+              <input type="number" id="cfgHueBlendHighFreqInput" min="40" max="2000" step="1" value="880" aria-label="Blend high frequency" />
+            </div>
+          </div>
+        </details>
+
+        <details class="settings-group">
+          <summary>Saturation Mapping</summary>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Saturation Active Noise Range (0–1)</label>
+            <div class="dual-track-wrap">
+              <input type="range" id="cfgSatNoiseStartRange" class="slider dual-slider" min="0" max="1" step="0.01" />
+              <input type="range" id="cfgSatNoiseEndRange" class="slider dual-slider" min="0" max="1" step="0.01" />
+            </div>
+            <div class="dual-values">
+              <input type="number" id="cfgSatNoiseStartInput" min="0" max="1" step="0.01" aria-label="Saturation noise start" />
+              <input type="number" id="cfgSatNoiseEndInput" min="0" max="1" step="0.01" aria-label="Saturation noise end" />
+            </div>
+          </div>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Noise Gain Range</label>
+            <div class="dual-track-wrap">
+              <input type="range" id="cfgNoiseGainMinRange" class="slider dual-slider" min="0" max="1" step="0.01" />
+              <input type="range" id="cfgNoiseGainMaxRange" class="slider dual-slider" min="0" max="1" step="0.01" />
+            </div>
+            <div class="dual-values">
+              <input type="number" id="cfgNoiseGainMinInput" min="0" max="1" step="0.01" aria-label="Noise gain minimum" />
+              <input type="number" id="cfgNoiseGainMaxInput" min="0" max="1" step="0.01" aria-label="Noise gain maximum" />
+            </div>
+          </div>
+        </details>
+
+        <details class="settings-group">
+          <summary>Lightness Mapping</summary>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Volume Lightness Range (0–1)</label>
+            <div class="dual-track-wrap">
+              <input type="range" id="cfgVolStartRange" class="slider dual-slider" min="0" max="1" step="0.01" value="0" />
+              <input type="range" id="cfgVolEndRange" class="slider dual-slider" min="0" max="1" step="0.01" value="0.5" />
+            </div>
+            <div class="dual-values">
+              <input type="number" id="cfgVolStartInput" min="0" max="1" step="0.01" value="0" aria-label="Volume lightness start" />
+              <input type="number" id="cfgVolEndInput" min="0" max="1" step="0.01" value="0.5" aria-label="Volume lightness end" />
+            </div>
+          </div>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Volume Gain Range</label>
+            <div class="dual-track-wrap">
+              <input type="range" id="cfgVolMinRange" class="slider dual-slider" min="0" max="1" step="0.01" value="0" />
+              <input type="range" id="cfgVolMaxRange" class="slider dual-slider" min="0" max="1" step="0.01" value="0.8" />
+            </div>
+            <div class="dual-values">
+              <input type="number" id="cfgVolMinInput" min="0" max="1" step="0.01" value="0" aria-label="Volume minimum" />
+              <input type="number" id="cfgVolMaxInput" min="0" max="1" step="0.01" value="0.8" aria-label="Volume maximum" />
+            </div>
+          </div>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Bell Blend Lightness Range (0–1)</label>
+            <div class="dual-track-wrap">
+              <input type="range" id="cfgBellBlendStartRange" class="slider dual-slider" min="0" max="1" step="0.01" value="0.5" />
+              <input type="range" id="cfgBellBlendEndRange" class="slider dual-slider" min="0" max="1" step="0.01" value="1" />
+            </div>
+            <div class="dual-values">
+              <input type="number" id="cfgBellBlendStartInput" min="0" max="1" step="0.01" value="0.5" aria-label="Bell blend start" />
+              <input type="number" id="cfgBellBlendEndInput" min="0" max="1" step="0.01" value="1" aria-label="Bell blend end" />
+            </div>
+          </div>
+        </details>
+
+        <details class="settings-group">
+          <summary>Sound Character</summary>
+
+          <div class="setting-row">
+            <label class="settings-label" for="cfgNoiseType">Noise Type</label>
+            <select id="cfgNoiseType" class="settings-select">
+              <option value="pink" selected>Pink</option>
+              <option value="white">White</option>
+              <option value="brown">Brown</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="settings-label" for="cfgThereminWaveform">Theremin Waveform</label>
+            <select id="cfgThereminWaveform" class="settings-select">
+              <option value="sine" selected>Sine</option>
+              <option value="triangle">Triangle</option>
+              <option value="sawtooth">Sawtooth</option>
+              <option value="square">Square</option>
+            </select>
+          </div>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Theremin LFO Range (Rate Hz / Depth Ratio)</label>
+            <div class="dual-values">
+              <input type="number" id="cfgThereminLfoRateInput" min="0" max="20" step="0.1" value="5" aria-label="Theremin LFO rate" />
+              <input type="number" id="cfgThereminLfoDepthInput" min="0" max="0.1" step="0.001" value="0.012" aria-label="Theremin LFO depth ratio" />
+            </div>
+          </div>
+
+          <div class="dual-control" data-dual-range>
+            <label class="settings-label">Bell Timbre (Inharmonic Ratio / Brightness)</label>
+            <div class="dual-values">
+              <input type="number" id="cfgBellInharmonicInput" min="1" max="20" step="0.01" aria-label="Bell inharmonic ratio" />
+              <input type="number" id="cfgBellBrightnessInput" min="0" max="20" step="0.01" aria-label="Bell brightness" />
+            </div>
+          </div>
+        </details>
+      </section>
+
       <!-- Screen-reader live announcement region -->
       <div id="srAnnounce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
